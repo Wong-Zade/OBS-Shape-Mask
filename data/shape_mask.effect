@@ -1,0 +1,79 @@
+uniform float4x4 ViewProj;
+uniform texture2d image;
+
+uniform int   shape_type;
+uniform float feather;
+uniform float shape_scale;
+uniform float2 offset;
+uniform float2 uv_size;
+
+sampler_state def_sampler {
+	Filter    = Linear;
+	AddressU  = Clamp;
+	AddressV  = Clamp;
+};
+
+struct VertData {
+	float4 pos : POSITION;
+	float2 uv  : TEXCOORD0;
+};
+
+VertData VSDefault(VertData v_in)
+{
+	VertData vert_out;
+	vert_out.pos = mul(float4(v_in.pos.xyz, 1.0), ViewProj);
+	vert_out.uv  = v_in.uv;
+	return vert_out;
+}
+
+float shape_alpha_circle(float2 uv, float2 center, float radius, float feather_amt)
+{
+	float aspect = uv_size.x / uv_size.y;
+	float2 p = uv - center;
+	p.x *= aspect;
+	float d = length(p) - radius;
+	return 1.0 - smoothstep(0.0, feather_amt, d);
+}
+
+float shape_alpha_rounded_rect(float2 uv, float2 center, float2 half_size, float corner, float feather_amt)
+{
+	float2 p = abs(uv - center) - (half_size - corner);
+	float d = length(max(p, float2(0.0, 0.0))) - corner;
+	return 1.0 - smoothstep(0.0, feather_amt, d);
+}
+
+float4 PSShapeMask(VertData v_in) : TARGET
+{
+	float4 color = image.Sample(def_sampler, v_in.uv);
+
+	float2 center = float2(0.5, 0.5) + offset;
+	float alpha = 1.0;
+	float feather_amt = max(feather, 0.001);
+
+	if (shape_type == 0) {
+		alpha = shape_alpha_circle(v_in.uv, center, 0.45 * shape_scale, feather_amt);
+	} else if (shape_type == 1) {
+		float2 half_size = float2(0.42, 0.32) * shape_scale;
+		alpha = shape_alpha_rounded_rect(v_in.uv, center, half_size, 0.08 * shape_scale, feather_amt);
+	} else {
+		float aspect = uv_size.x / uv_size.y;
+		float2 p = v_in.uv - center;
+		p.x *= aspect;
+		float rx = 0.45 * shape_scale;
+		float ry = 0.30 * shape_scale;
+		float d = length(float2(p.x / rx, p.y / ry)) - 1.0;
+		alpha = 1.0 - smoothstep(0.0, feather_amt * 4.0, d);
+	}
+
+	color.a *= saturate(alpha);
+	return color;
+}
+
+technique Draw
+{
+	pass
+	{
+		vertex_shader = VSDefault(v_in);
+		pixel_shader  = PSShapeMask(v_in);
+	}
+}
