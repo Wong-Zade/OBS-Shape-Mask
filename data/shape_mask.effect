@@ -1,11 +1,21 @@
 uniform float4x4 ViewProj;
 uniform texture2d image;
 
-uniform int   shape_type;
-uniform float feather;
-uniform float shape_scale;
+uniform int    shape_type;
+uniform float  shape_scale;
 uniform float2 offset;
 uniform float2 uv_size;
+uniform float  feather;
+uniform float  corner_radius;
+
+uniform bool   border_enabled;
+uniform float4 border_color;
+uniform float  border_width;
+uniform float  border_glow;
+uniform bool   border_pulse;
+uniform float  pulse_speed;
+uniform float  pulse_amount;
+uniform float  time_seconds;
 
 sampler_state def_sampler {
 	Filter    = Linear;
@@ -26,20 +36,31 @@ VertData VSDefault(VertData v_in)
 	return vert_out;
 }
 
-float shape_alpha_circle(float2 uv, float2 center, float radius, float feather_amt)
+/* Each of these returns a SIGNED DISTANCE to the shape edge:
+   negative = inside the shape, positive = outside, 0 = exactly on the edge.
+   This lets us build both the fill mask and an edge-hugging border ring
+   from the same value. */
+
+float dist_circle(float2 uv, float2 center, float radius)
 {
 	float aspect = uv_size.x / uv_size.y;
 	float2 p = uv - center;
 	p.x *= aspect;
-	float d = length(p) - radius;
-	return 1.0 - smoothstep(0.0, feather_amt, d);
+	return length(p) - radius;
 }
 
-float shape_alpha_rounded_rect(float2 uv, float2 center, float2 half_size, float corner, float feather_amt)
+float dist_rounded_rect(float2 uv, float2 center, float2 half_size, float corner)
 {
 	float2 p = abs(uv - center) - (half_size - corner);
-	float d = length(max(p, float2(0.0, 0.0))) - corner;
-	return 1.0 - smoothstep(0.0, feather_amt, d);
+	return length(max(p, float2(0.0, 0.0))) - corner;
+}
+
+float dist_ellipse(float2 uv, float2 center, float rx, float ry)
+{
+	float aspect = uv_size.x / uv_size.y;
+	float2 p = uv - center;
+	p.x *= aspect;
+	return length(float2(p.x / rx, p.y / ry)) - 1.0;
 }
 
 float4 PSShapeMask(VertData v_in) : TARGET
@@ -47,25 +68,50 @@ float4 PSShapeMask(VertData v_in) : TARGET
 	float4 color = image.Sample(def_sampler, v_in.uv);
 
 	float2 center = float2(0.5, 0.5) + offset;
-	float alpha = 1.0;
 	float feather_amt = max(feather, 0.001);
 
+	float d;
 	if (shape_type == 0) {
-		alpha = shape_alpha_circle(v_in.uv, center, 0.45 * shape_scale, feather_amt);
+		d = dist_circle(v_in.uv, center, 0.45 * shape_scale);
 	} else if (shape_type == 1) {
 		float2 half_size = float2(0.42, 0.32) * shape_scale;
-		alpha = shape_alpha_rounded_rect(v_in.uv, center, half_size, 0.08 * shape_scale, feather_amt);
+		/* Clamp so the corner radius can never exceed the shape's own
+		   half-size, which would otherwise invert/distort the rectangle. */
+		float corner = min(corner_radius * shape_scale, min(half_size.x, half_size.y));
+		d = dist_rounded_rect(v_in.uv, center, half_size, corner);
 	} else {
-		float aspect = uv_size.x / uv_size.y;
-		float2 p = v_in.uv - center;
-		p.x *= aspect;
-		float rx = 0.45 * shape_scale;
-		float ry = 0.30 * shape_scale;
-		float d = length(float2(p.x / rx, p.y / ry)) - 1.0;
-		alpha = 1.0 - smoothstep(0.0, feather_amt * 4.0, d);
+		d = dist_ellipse(v_in.uv, center, 0.45 * shape_scale, 0.30 * shape_scale) * 0.25;
 	}
 
-	color.a *= saturate(alpha);
+	/* Fill mask: 1 inside the shape, fading to 0 across the feather band. */
+	float fill_alpha = 1.0 - smoothstep(0.0, feather_amt, d);
+	color.a *= saturate(fill_alpha);
+
+	if (border_enabled) {
+		float width = border_width;
+		if (border_pulse) {
+			/* Pulse the border thickness by ±pulse_amount around its base
+			   width, at the chosen speed. pulse_amount == 0 disables the
+			   visible swing; 1.0 is a full-strength pulse. */
+			width *= 1.0 + pulse_amount * sin(time_seconds * pulse_speed);
+		}
+
+		/* Ring alpha: peaks at d == 0 (the exact edge), fades out over `width`
+		   on both sides. abs(d) makes it hug the boundary regardless of
+		   whether we're just inside or just outside the shape. */
+		float ring = 1.0 - smoothstep(0.0, max(width, 0.001), abs(d));
+
+		/* Soft outer glow: a wider, dimmer falloff added behind the ring. */
+		float glow = (1.0 - smoothstep(0.0, max(width, 0.001) * 4.0, abs(d))) * border_glow;
+
+		float border_alpha = saturate(ring + glow * (1.0 - ring));
+		float4 border = float4(border_color.rgb, border_alpha * border_color.a);
+
+		/* Composite border over the (already masked) fill color. */
+		color.rgb = lerp(color.rgb, border.rgb, border.a);
+		color.a = saturate(color.a + border.a);
+	}
+
 	return color;
 }
 
