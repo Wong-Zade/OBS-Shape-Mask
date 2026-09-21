@@ -1,12 +1,15 @@
 uniform float4x4 ViewProj;
 uniform texture2d image;
+uniform texture2d mask_image;
 
 uniform int    shape_type;
-uniform float  shape_scale;
+uniform float2 shape_scale;
 uniform float2 offset;
 uniform float2 uv_size;
 uniform float  feather;
 uniform float  corner_radius;
+uniform bool   mask_invert;
+uniform bool   use_source_mask;
 
 uniform bool   border_enabled;
 uniform float4 border_color;
@@ -17,7 +20,19 @@ uniform float  pulse_speed;
 uniform float  pulse_amount;
 uniform float  time_seconds;
 
+uniform bool   shadow_enabled;
+uniform float4 shadow_color;
+uniform float2 shadow_offset;
+uniform float  shadow_blur;
+uniform float  shadow_opacity;
+
 sampler_state def_sampler {
+	Filter    = Linear;
+	AddressU  = Clamp;
+	AddressV  = Clamp;
+};
+
+sampler_state mask_sampler {
 	Filter    = Linear;
 	AddressU  = Clamp;
 	AddressV  = Clamp;
@@ -36,83 +51,138 @@ VertData VSDefault(VertData v_in)
 	return vert_out;
 }
 
-/* Each of these returns a SIGNED DISTANCE to the shape edge:
-   negative = inside the shape, positive = outside, 0 = exactly on the edge.
-   This lets us build both the fill mask and an edge-hugging border ring
-   from the same value. */
-
-float dist_circle(float2 uv, float2 center, float radius)
+float dist_circle(float2 uv, float2 center, float2 scale)
 {
 	float aspect = uv_size.x / uv_size.y;
 	float2 p = uv - center;
 	p.x *= aspect;
-	return length(p) - radius;
+	float2 radii = float2(0.45, 0.45) * scale;
+	return (length(p / radii) - 1.0) * min(radii.x, radii.y);
 }
 
-float dist_rounded_rect(float2 uv, float2 center, float2 half_size, float corner)
-{
-	float2 p = abs(uv - center) - (half_size - corner);
-	return length(max(p, float2(0.0, 0.0))) - corner;
-}
-
-float dist_ellipse(float2 uv, float2 center, float rx, float ry)
+float dist_rounded_rect(float2 uv, float2 center, float2 scale, float corner)
 {
 	float aspect = uv_size.x / uv_size.y;
 	float2 p = uv - center;
 	p.x *= aspect;
-	return length(float2(p.x / rx, p.y / ry)) - 1.0;
+	float2 half_size = float2(0.42, 0.32) * scale;
+	float c = min(corner, min(half_size.x, half_size.y));
+	float2 q = abs(p) - (half_size - c);
+	return length(max(q, float2(0.0, 0.0))) - c;
+}
+
+float dist_ellipse(float2 uv, float2 center, float2 scale)
+{
+	float aspect = uv_size.x / uv_size.y;
+	float2 p = uv - center;
+	p.x *= aspect;
+	float2 radii = float2(0.45, 0.30) * scale;
+	return (length(p / radii) - 1.0) * min(radii.x, radii.y);
+}
+
+float dist_hexagon(float2 uv, float2 center, float2 scale)
+{
+	float aspect = uv_size.x / uv_size.y;
+	float2 p = uv - center;
+	p.x *= aspect;
+
+	float2 radii = float2(0.45, 0.45) * scale;
+	p /= radii;
+
+	const float3 k = float3(-0.866025404, 0.5, 0.577350269);
+	p = abs(p);
+	p -= 2.0 * min(dot(k.xy, p), 0.0) * k.xy;
+	p -= float2(clamp(p.x, -k.z, k.z), 1.0);
+	float d = length(p) * sign(p.y);
+
+	return d * min(radii.x, radii.y);
+}
+
+float shape_distance(float2 uv, float2 center, float2 scale, float corner)
+{
+	if (shape_type == 0)
+		return dist_circle(uv, center, scale);
+	if (shape_type == 1)
+		return dist_rounded_rect(uv, center, scale, corner);
+	if (shape_type == 3)
+		return dist_hexagon(uv, center, scale);
+	return dist_ellipse(uv, center, scale);
 }
 
 float4 PSShapeMask(VertData v_in) : TARGET
 {
-	float4 color = image.Sample(def_sampler, v_in.uv);
+	float4 src = image.Sample(def_sampler, v_in.uv);
 
 	float2 center = float2(0.5, 0.5) + offset;
 	float feather_amt = max(feather, 0.001);
 
-	float d;
-	if (shape_type == 0) {
-		d = dist_circle(v_in.uv, center, 0.45 * shape_scale);
-	} else if (shape_type == 1) {
-		float2 half_size = float2(0.42, 0.32) * shape_scale;
-		/* Clamp so the corner radius can never exceed the shape's own
-		   half-size, which would otherwise invert/distort the rectangle. */
-		float corner = min(corner_radius * shape_scale, min(half_size.x, half_size.y));
-		d = dist_rounded_rect(v_in.uv, center, half_size, corner);
+	float d = 0.0;
+	float fill_alpha;
+
+	if (use_source_mask) {
+		/* Use the picked source's own alpha channel as the mask, instead
+		   of a geometric shape. No distance field exists here, so the
+		   border ring effect is skipped for this mode (handled on the
+		   CPU side by disabling border_enabled when use_source_mask is
+		   set). */
+		fill_alpha = mask_image.Sample(mask_sampler, v_in.uv).a;
 	} else {
-		d = dist_ellipse(v_in.uv, center, 0.45 * shape_scale, 0.30 * shape_scale) * 0.25;
+		d = shape_distance(v_in.uv, center, shape_scale, corner_radius);
+		fill_alpha = saturate(1.0 - smoothstep(0.0, feather_amt, d));
 	}
 
-	/* Fill mask: 1 inside the shape, fading to 0 across the feather band. */
-	float fill_alpha = 1.0 - smoothstep(0.0, feather_amt, d);
-	color.a *= saturate(fill_alpha);
+	if (mask_invert)
+		fill_alpha = 1.0 - fill_alpha;
+
+	float4 fill = float4(src.rgb, src.a * saturate(fill_alpha));
+
+	float4 result = float4(0.0, 0.0, 0.0, 0.0);
+
+	if (shadow_enabled) {
+		float shadow_alpha;
+		if (use_source_mask) {
+			float2 shadow_uv = v_in.uv - shadow_offset;
+			shadow_alpha = mask_image.Sample(mask_sampler, shadow_uv).a;
+		} else {
+			float2 shadow_center = center + shadow_offset;
+			float d_shadow = shape_distance(v_in.uv, shadow_center, shape_scale, corner_radius);
+			shadow_alpha = saturate(1.0 - smoothstep(0.0, max(shadow_blur, 0.001), d_shadow));
+		}
+
+		if (mask_invert)
+			shadow_alpha = 1.0 - shadow_alpha;
+
+		shadow_alpha *= shadow_opacity * shadow_color.a;
+		result = float4(shadow_color.rgb, shadow_alpha);
+	}
+
+	/* Porter-Duff "over": fill over result (shadow, or transparent). */
+	float out_a = fill.a + result.a * (1.0 - fill.a);
+	float3 out_rgb = float3(0.0, 0.0, 0.0);
+	if (out_a > 0.0001)
+		out_rgb = (fill.rgb * fill.a + result.rgb * result.a * (1.0 - fill.a)) / out_a;
+	result = float4(out_rgb, out_a);
 
 	if (border_enabled) {
 		float width = border_width;
 		if (border_pulse) {
-			/* Pulse the border thickness by ±pulse_amount around its base
-			   width, at the chosen speed. pulse_amount == 0 disables the
-			   visible swing; 1.0 is a full-strength pulse. */
 			width *= 1.0 + pulse_amount * sin(time_seconds * pulse_speed);
 		}
 
-		/* Ring alpha: peaks at d == 0 (the exact edge), fades out over `width`
-		   on both sides. abs(d) makes it hug the boundary regardless of
-		   whether we're just inside or just outside the shape. */
 		float ring = 1.0 - smoothstep(0.0, max(width, 0.001), abs(d));
-
-		/* Soft outer glow: a wider, dimmer falloff added behind the ring. */
 		float glow = (1.0 - smoothstep(0.0, max(width, 0.001) * 4.0, abs(d))) * border_glow;
 
 		float border_alpha = saturate(ring + glow * (1.0 - ring));
 		float4 border = float4(border_color.rgb, border_alpha * border_color.a);
 
-		/* Composite border over the (already masked) fill color. */
-		color.rgb = lerp(color.rgb, border.rgb, border.a);
-		color.a = saturate(color.a + border.a);
+		float new_a = border.a + result.a * (1.0 - border.a);
+		float3 new_rgb = float3(0.0, 0.0, 0.0);
+		if (new_a > 0.0001)
+			new_rgb = (border.rgb * border.a + result.rgb * result.a * (1.0 - border.a)) / new_a;
+		result = float4(new_rgb, new_a);
 	}
 
-	return color;
+	return result;
 }
 
 technique Draw
