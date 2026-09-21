@@ -8,11 +8,18 @@ uniform float2 offset;
 uniform float2 uv_size;
 uniform float  feather;
 uniform float  corner_radius;
+uniform float rotation;
+uniform float polygon_sides;
+uniform float star_inner;
 uniform bool   mask_invert;
 uniform bool   use_source_mask;
 
 uniform bool   border_enabled;
 uniform float4 border_color;
+uniform float4 border_color2;
+uniform int   border_style;
+uniform float border_opacity;
+uniform float border_dash;
 uniform float  border_width;
 uniform float  border_glow;
 uniform bool   border_pulse;
@@ -25,6 +32,14 @@ uniform float4 shadow_color;
 uniform float2 shadow_offset;
 uniform float  shadow_blur;
 uniform float  shadow_opacity;
+uniform bool  glow_enabled;
+uniform float4 glow_color;
+uniform float  glow_size;
+uniform float  glow_intensity;
+uniform bool  glow_pulse;
+uniform int   animation;
+uniform float animation_speed;
+uniform float animation_amount;
 
 sampler_state def_sampler {
 	Filter    = Linear;
@@ -51,137 +66,128 @@ VertData VSDefault(VertData v_in)
 	return vert_out;
 }
 
-float dist_circle(float2 uv, float2 center, float2 scale)
+float2 rotate_point(float2 p, float a)
 {
-	float aspect = uv_size.x / uv_size.y;
-	float2 p = uv - center;
-	p.x *= aspect;
-	float2 radii = float2(0.45, 0.45) * scale;
-	return (length(p / radii) - 1.0) * min(radii.x, radii.y);
+	float s = sin(a);
+	float c = cos(a);
+	return float2(c * p.x - s * p.y, s * p.x + c * p.y);
 }
 
-float dist_rounded_rect(float2 uv, float2 center, float2 scale, float corner)
+float2 shape_point(float2 uv, float2 center)
 {
 	float aspect = uv_size.x / uv_size.y;
 	float2 p = uv - center;
 	p.x *= aspect;
-	float2 half_size = float2(0.42, 0.32) * scale;
+	return p;
+}
+
+float sd_circle(float2 p, float r)
+{
+	return length(p) - r;
+}
+
+float sd_ellipse(float2 p, float2 r)
+{
+	return (length(p / r) - 1.0) * min(r.x, r.y);
+}
+
+float sd_round_rect(float2 p, float2 half_size, float corner)
+{
 	float c = min(corner, min(half_size.x, half_size.y));
 	float2 q = abs(p) - (half_size - c);
 	return length(max(q, float2(0.0, 0.0))) - c;
 }
 
-float dist_ellipse(float2 uv, float2 center, float2 scale)
+float sd_box(float2 p, float2 b)
 {
-	float aspect = uv_size.x / uv_size.y;
-	float2 p = uv - center;
-	p.x *= aspect;
-	float2 radii = float2(0.45, 0.30) * scale;
-	return (length(p / radii) - 1.0) * min(radii.x, radii.y);
+	float2 q = abs(p) - b;
+	return length(max(q, float2(0.0, 0.0))) + min(max(q.x, q.y), 0.0);
 }
 
-float dist_hexagon(float2 uv, float2 center, float2 scale)
+float sd_regular_polygon(float2 p, float sides, float radius)
 {
-	float aspect = uv_size.x / uv_size.y;
-	float2 p = uv - center;
-	p.x *= aspect;
+	float a = atan2(p.y, p.x);
+	float sector = 6.28318530718 / max(sides, 3.0);
+	float h = cos(floor(0.5 + a / sector) * sector - a) * radius;
+	return length(p) * cos(sector * 0.5) - h;
+}
 
-	float2 radii = float2(0.45, 0.45) * scale;
-	p /= radii;
-
-	const float3 k = float3(-0.866025404, 0.5, 0.577350269);
-	p = abs(p);
-	p -= 2.0 * min(dot(k.xy, p), 0.0) * k.xy;
-	p -= float2(clamp(p.x, -k.z, k.z), 1.0);
-	float d = length(p) * sign(p.y);
-
-	return d * min(radii.x, radii.y);
+float sd_star(float2 p, float radius, float inner)
+{
+	float a = atan2(p.y, p.x);
+	float r = length(p);
+	float sector = 6.28318530718 / 10.0;
+	float local = abs(frac((a + sector * 0.5) / sector) * sector - sector * 0.5);
+	float edge = lerp(radius * inner, radius, step(sector * 0.5, local));
+	return r - edge;
 }
 
 float shape_distance(float2 uv, float2 center, float2 scale, float corner)
 {
-	if (shape_type == 0)
-		return dist_circle(uv, center, scale);
-	if (shape_type == 1)
-		return dist_rounded_rect(uv, center, scale, corner);
-	if (shape_type == 3)
-		return dist_hexagon(uv, center, scale);
-	return dist_ellipse(uv, center, scale);
+	float2 p = shape_point(uv, center);
+	p = rotate_point(p, -rotation * 0.01745329252);
+	float r = 0.45 * min(scale.x, scale.y);
+	if (shape_type == 0) return sd_circle(p, r);
+	if (shape_type == 1) return sd_round_rect(p, float2(0.42,0.32)*scale, corner*min(scale.x,scale.y));
+	if (shape_type == 2) return sd_ellipse(p, float2(0.45,0.30)*scale);
+	if (shape_type == 3) return sd_regular_polygon(p, max(polygon_sides, 3.0), r);
+	if (shape_type == 4) return sd_box(p, float2(0.42,0.32)*scale);
+	if (shape_type == 5) return sd_regular_polygon(p, 3.0, r);
+	if (shape_type == 6) return sd_regular_polygon(p, 4.0, r);
+	if (shape_type == 7) return sd_regular_polygon(p, 8.0, r);
+	return sd_star(p, r, star_inner);
 }
 
 float4 PSShapeMask(VertData v_in) : TARGET
 {
 	float4 src = image.Sample(def_sampler, v_in.uv);
-
-	float2 center = float2(0.5, 0.5) + offset;
-	float feather_amt = max(feather, 0.001);
-
-	float d = 0.0;
+	float t = time_seconds * animation_speed;
+	float anim = sin(t);
+	float2 center = float2(0.5,0.5) + offset;
+	float2 animated_offset = float2(0.0,0.0);
+	if (animation == 4) animated_offset.y = abs(anim)*animation_amount*0.03;
+	if (animation == 5) animated_offset = float2(sin(t*7.0),cos(t*6.0))*animation_amount*0.01;
+	float anim_scale = 1.0;
+	if (animation == 1) anim_scale += anim*animation_amount*0.15;
+	if (animation == 2) anim_scale += (anim*0.5+0.5)*animation_amount*0.12;
+	if (animation == 6) anim_scale += anim*animation_amount*0.20;
+	float2 render_scale = shape_scale * anim_scale;
+	float d=0.0;
 	float fill_alpha;
-
-	if (use_source_mask) {
-		/* Use the picked source's own alpha channel as the mask, instead
-		   of a geometric shape. No distance field exists here, so the
-		   border ring effect is skipped for this mode (handled on the
-		   CPU side by disabling border_enabled when use_source_mask is
-		   set). */
-		fill_alpha = mask_image.Sample(mask_sampler, v_in.uv).a;
-	} else {
-		d = shape_distance(v_in.uv, center, shape_scale, corner_radius);
-		fill_alpha = saturate(1.0 - smoothstep(0.0, feather_amt, d));
-	}
-
-	if (mask_invert)
-		fill_alpha = 1.0 - fill_alpha;
-
-	float4 fill = float4(src.rgb, src.a * saturate(fill_alpha));
-
-	float4 result = float4(0.0, 0.0, 0.0, 0.0);
-
+	if (use_source_mask) fill_alpha = mask_image.Sample(mask_sampler,v_in.uv).a;
+	else { d=shape_distance(v_in.uv,center+animated_offset,render_scale,corner_radius); fill_alpha=saturate(1.0-smoothstep(0.0,max(feather,0.001),d)); }
+	if (mask_invert) fill_alpha=1.0-fill_alpha;
+	float4 result=float4(src.rgb,src.a*saturate(fill_alpha));
 	if (shadow_enabled) {
 		float shadow_alpha;
-		if (use_source_mask) {
-			float2 shadow_uv = v_in.uv - shadow_offset;
-			shadow_alpha = mask_image.Sample(mask_sampler, shadow_uv).a;
-		} else {
-			float2 shadow_center = center + shadow_offset;
-			float d_shadow = shape_distance(v_in.uv, shadow_center, shape_scale, corner_radius);
-			shadow_alpha = saturate(1.0 - smoothstep(0.0, max(shadow_blur, 0.001), d_shadow));
-		}
-
-		if (mask_invert)
-			shadow_alpha = 1.0 - shadow_alpha;
-
-		shadow_alpha *= shadow_opacity * shadow_color.a;
-		result = float4(shadow_color.rgb, shadow_alpha);
+		if (use_source_mask) shadow_alpha=mask_image.Sample(mask_sampler,v_in.uv-shadow_offset).a;
+		else { float sd=shape_distance(v_in.uv,center+shadow_offset+animated_offset,render_scale,corner_radius); shadow_alpha=saturate(1.0-smoothstep(0.0,max(shadow_blur,0.001),sd)); }
+		if(mask_invert) shadow_alpha=1.0-shadow_alpha;
+		shadow_alpha*=shadow_opacity*shadow_color.a;
+		float na=shadow_alpha+result.a*(1.0-shadow_alpha);
+		float3 nr=shadow_color.rgb*shadow_alpha+result.rgb*result.a*(1.0-shadow_alpha);
+		if(na>0.0001) nr/=na; result=float4(nr,na);
 	}
-
-	/* Porter-Duff "over": fill over result (shadow, or transparent). */
-	float out_a = fill.a + result.a * (1.0 - fill.a);
-	float3 out_rgb = float3(0.0, 0.0, 0.0);
-	if (out_a > 0.0001)
-		out_rgb = (fill.rgb * fill.a + result.rgb * result.a * (1.0 - fill.a)) / out_a;
-	result = float4(out_rgb, out_a);
-
-	if (border_enabled) {
-		float width = border_width;
-		if (border_pulse) {
-			width *= 1.0 + pulse_amount * sin(time_seconds * pulse_speed);
-		}
-
-		float ring = 1.0 - smoothstep(0.0, max(width, 0.001), abs(d));
-		float glow = (1.0 - smoothstep(0.0, max(width, 0.001) * 4.0, abs(d))) * border_glow;
-
-		float border_alpha = saturate(ring + glow * (1.0 - ring));
-		float4 border = float4(border_color.rgb, border_alpha * border_color.a);
-
-		float new_a = border.a + result.a * (1.0 - border.a);
-		float3 new_rgb = float3(0.0, 0.0, 0.0);
-		if (new_a > 0.0001)
-			new_rgb = (border.rgb * border.a + result.rgb * result.a * (1.0 - border.a)) / new_a;
-		result = float4(new_rgb, new_a);
+	if(border_enabled && !use_source_mask) {
+		float width=max(border_width,0.0005);
+		if(border_pulse) width*=1.0+pulse_amount*sin(time_seconds*pulse_speed);
+		float ring=1.0-smoothstep(0.0,width,abs(d));
+		float4 bc=border_color;
+		float bt=saturate(d/max(width,0.0005)*0.5+0.5);
+		if(border_style==1) bc=lerp(border_color,border_color2,bt);
+		if(border_style==2) { float2 bp=shape_point(v_in.uv,center); float a=atan2(bp.y,bp.x); ring*=step(0.5,frac((a+3.14159265)*border_dash/6.2831853)); }
+		float eg=(1.0-smoothstep(width,width*4.0,max(d,0.0)))*border_glow;
+		float ba=saturate(max(ring,eg*(1.0-ring)))*border_opacity*bc.a;
+		float na=ba+result.a*(1.0-ba); float3 nr=bc.rgb*ba+result.rgb*result.a*(1.0-ba);
+		if(na>0.0001) nr/=na; result=float4(nr,na);
 	}
-
+	if(glow_enabled && !use_source_mask) {
+		float ga=(1.0-smoothstep(0.0,max(glow_size,0.001),max(d,0.0)))*glow_intensity;
+		if(glow_pulse) ga*=0.75+0.25*(sin(t)+1.0);
+		ga*=glow_color.a;
+		float na=saturate(max(result.a,ga)); float3 nr=glow_color.rgb*ga+result.rgb*result.a*(1.0-ga);
+		if(na>0.0001) nr/=na; result=float4(nr,na);
+	}
 	return result;
 }
 
