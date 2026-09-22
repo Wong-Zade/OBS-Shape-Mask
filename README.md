@@ -14,7 +14,6 @@ A filter plugin for [OBS Studio](https://obsproject.com) that masks any source �
 - **Feathered edges** — soft or hard-edged mask boundary
 - **Mask Invert** — show everything *outside* the shape instead of inside
 - **Border** — solid or dashed, with adjustable width, opacity, and an animated pulse
-- **Glow** — a separate soft halo effect around the shape edge, with optional pulsing
 - **Drop Shadow** — offset, blurred, colored shadow that sits behind your content
 - **Source Mask mode** — use another source's alpha channel as the mask instead of a geometric shape
 - **Hotkey-triggered pop animation** — bind a key to trigger a one-shot bouncy scale-in effect
