@@ -143,13 +143,13 @@ float4 PSShapeMask(VertData v_in) : TARGET
 		float ring=1.0-smoothstep(0.0,width,abs(d));
 		float4 bc=border_color;
 		if(border_style==1) { float2 bp=shape_point(v_in.uv,center); float a=atan2(bp.y,bp.x); ring*=step(0.5,frac((a+3.14159265)*border_dash/6.2831853)); }
-		float eg=(1.0-smoothstep(width,width*4.0,max(d,0.0)))*border_glow;
+		float eg=(1.0-smoothstep(width,width*4.0,abs(d)))*border_glow;
 		float ba=saturate(max(ring,eg*(1.0-ring)))*border_opacity*bc.a;
 		float na=ba+result.a*(1.0-ba); float3 nr=bc.rgb*ba+result.rgb*result.a*(1.0-ba);
 		if(na>0.0001) nr/=na; result=float4(nr,na);
 	}
 	if(glow_enabled && !use_source_mask) {
-		float ga=(1.0-smoothstep(0.0,max(glow_size,0.001),max(d,0.0)))*glow_intensity;
+		float ga=(1.0-smoothstep(0.0,max(glow_size,0.001),abs(d)))*glow_intensity;
 		if(glow_pulse) ga*=0.75+0.25*(sin(t)+1.0);
 		ga*=glow_color.a;
 		float na=saturate(max(result.a,ga)); float3 nr=glow_color.rgb*ga+result.rgb*result.a*(1.0-ga);
