@@ -18,6 +18,7 @@ uniform int   border_style;
 uniform float border_opacity;
 uniform float border_dash;
 uniform float  border_width;
+uniform float  border_softness;
 uniform float  border_glow;
 uniform bool   border_pulse;
 uniform float  pulse_speed;
@@ -147,7 +148,9 @@ float4 PSShapeMask(VertData v_in) : TARGET
 	if(border_enabled && !use_source_mask) {
 		float width=max(border_width,0.0005);
 		if(border_pulse) width*=1.0+pulse_amount*sin(time_seconds*pulse_speed);
-		float ring=1.0-smoothstep(0.0,width,abs(d));
+		float half_width = width * 0.5;
+		float soft = max(border_softness, 0.0003);
+		float ring=1.0-smoothstep(half_width-soft,half_width+soft,abs(d));
 		float4 bc=border_color;
 		if(border_style==1) { float2 bp=shape_point(v_in.uv,center); float a=atan2(bp.y,bp.x); ring*=step(0.5,frac((a+3.14159265)*border_dash/6.2831853)); }
 		float eg=(1.0-smoothstep(width,width*4.0,abs(d)))*border_glow;
