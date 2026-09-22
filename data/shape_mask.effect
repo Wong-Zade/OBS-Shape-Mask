@@ -137,8 +137,11 @@ float4 PSShapeMask(VertData v_in) : TARGET
 		else { float sd=shape_distance(v_in.uv,center+shadow_offset+animated_offset,render_scale,corner_radius,anim_rotation); shadow_alpha=saturate(1.0-smoothstep(0.0,max(shadow_blur,0.001),sd)); }
 		if(mask_invert) shadow_alpha=1.0-shadow_alpha;
 		shadow_alpha*=shadow_opacity*shadow_color.a;
-		float na=shadow_alpha+result.a*(1.0-shadow_alpha);
-		float3 nr=shadow_color.rgb*shadow_alpha+result.rgb*result.a*(1.0-shadow_alpha);
+		/* The fill goes OVER the shadow, not the other way around, so the
+		   shadow only shows through where the fill itself is transparent
+		   (outside the actual masked content) -- never painting over it. */
+		float na=result.a+shadow_alpha*(1.0-result.a);
+		float3 nr=result.rgb*result.a+shadow_color.rgb*shadow_alpha*(1.0-result.a);
 		if(na>0.0001) nr/=na; result=float4(nr,na);
 	}
 	if(border_enabled && !use_source_mask) {
