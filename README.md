@@ -1,59 +1,52 @@
-# OBS Plugin Template
+# OBS Shape Mask
 
-## Introduction
+A filter plugin for [OBS Studio](https://obsproject.com) that masks any source — window capture, webcam, browser source, anything — into a shape, with a border, glow, drop shadow, and simple animations.
+<img width="1366" height="768" alt="Screenshot (175)" src="https://github.com/user-attachments/assets/76f397a0-3c0d-44e2-a8eb-594f1530ce1d" />
 
-The plugin template is meant to be used as a starting point for OBS Studio plugin development. It includes:
+![Shape Mask filter demo](docs/demo.gif)
 
-* Boilerplate plugin source code
-* A CMake project file
-* GitHub Actions workflows and repository actions
 
-## Supported Build Environments
+## Features
 
-| Platform  | Tool   |
-|-----------|--------|
-| Windows   | Visual Studio 17 2022 |
-| macOS     | XCode 16.0 |
-| Windows, macOS  | CMake 3.30.5 |
-| Ubuntu 24.04 | CMake 3.28.3 |
-| Ubuntu 24.04 | `ninja-build` |
-| Ubuntu 24.04 | `pkg-config`
-| Ubuntu 24.04 | `build-essential` |
+- **Shapes** — Circle, Rectangle, Rounded Rectangle (with adjustable corner radius)
+- **Independent width/height sizing** — stretch a shape instead of only scaling it uniformly
+- **Rotation** — a static angle slider, plus a continuous spin option under Animation
+- **Feathered edges** — soft or hard-edged mask boundary
+- **Mask Invert** — show everything *outside* the shape instead of inside
+- **Border** — solid or dashed, with adjustable width, opacity, and an animated pulse
+- **Glow** — a separate soft halo effect around the shape edge, with optional pulsing
+- **Drop Shadow** — offset, blurred, colored shadow that sits behind your content
+- **Source Mask mode** — use another source's alpha channel as the mask instead of a geometric shape
+- **Hotkey-triggered pop animation** — bind a key to trigger a one-shot bouncy scale-in effect
+- **Shape Animation** — Pulse, Breathe, Rotate, Bounce, Shake, or Scale, running continuously
 
-## Quick Start
+## Installation
 
-An absolute bare-bones [Quick Start Guide](https://github.com/obsproject/obs-plugintemplate/wiki/Quick-Start-Guide) is available in the wiki.
+1. Go to the [Releases page](../../releases) and download the package for your OS (Windows/macOS/Linux).
+2. Extract it.
+3. Copy the plugin file into your OBS plugins folder:
+   - **Windows:** the `.dll` goes in `obs-plugins/64bit/`, and the rest of the files go in `data/obs-plugins/obs-shape-mask/`, both inside your OBS Studio install folder.
+   - **macOS/Linux:** follow the equivalent plugin folder structure for your OBS install.
+4. Restart OBS.
+5. Right-click any source → **Filters** → **+** → **Shape Mask**.
 
-## Documentation
+## Usage
 
-All documentation can be found in the [Plugin Template Wiki](https://github.com/obsproject/obs-plugintemplate/wiki).
+- Add the filter to any source and pick a shape, size, and position.
+- Turn on **Enable Border** or **Enable Glow** for an outline/halo effect.
+- Turn on **Enable Drop Shadow** for a soft shadow behind your content.
+- Switch **Mask Type** to **Source Mask** to use another source's alpha channel as the mask instead of a geometric shape (note: the Border effect isn't available in this mode).
+- Bind the **"Shape Mask: Trigger Pop Animation"** hotkey under OBS Settings → Hotkeys for a one-shot pop-in effect.
 
-Suggested reading to get up and running:
+## Building from source
 
-* [Getting started](https://github.com/obsproject/obs-plugintemplate/wiki/Getting-Started)
-* [Build system requirements](https://github.com/obsproject/obs-plugintemplate/wiki/Build-System-Requirements)
-* [Build system options](https://github.com/obsproject/obs-plugintemplate/wiki/CMake-Build-System-Options)
+This plugin is built on the official [obs-plugintemplate](https://github.com/obsproject/obs-plugintemplate) and builds automatically via GitHub Actions on every push. To build locally, follow the standard instructions in the OBS plugin template's own documentation for your platform (CMake + your OS's usual build toolchain).
 
-## GitHub Actions & CI
+## Known limitations
 
-Default GitHub Actions workflows are available for the following repository actions:
+- The Border effect doesn't apply in Source Mask mode, since it relies on shape geometry a source mask doesn't have.
+- Picking the same source the filter is applied to as a Source Mask is blocked (to avoid an infinite render loop) rather than causing a crash.
 
-* `push`: Run for commits or tags pushed to `master` or `main` branches.
-* `pr-pull`: Run when a Pull Request has been pushed or synchronized.
-* `dispatch`: Run when triggered by the workflow dispatch in GitHub's user interface.
-* `build-project`: Builds the actual project and is triggered by other workflows.
-* `check-format`: Checks CMake and plugin source code formatting and is triggered by other workflows.
+## License
 
-The workflows make use of GitHub repository actions (contained in `.github/actions`) and build scripts (contained in `.github/scripts`) which are not needed for local development, but might need to be adjusted if additional/different steps are required to build the plugin.
-
-### Retrieving build artifacts
-
-Successful builds on GitHub Actions will produce build artifacts that can be downloaded for testing. These artifacts are commonly simple archives and will not contain package installers or installation programs.
-
-### Building a Release
-
-To create a release, an appropriately named tag needs to be pushed to the `main`/`master` branch using semantic versioning (e.g., `12.3.4`, `23.4.5-beta2`). A draft release will be created on the associated repository with generated installer packages or installation programs attached as release artifacts.
-
-## Signing and Notarizing on macOS
-
-Basic concepts of codesigning and notarization on macOS are explained in the correspodning [Wiki article](https://github.com/obsproject/obs-plugintemplate/wiki/Codesigning-On-macOS) which has a specific section for the [GitHub Actions setup](https://github.com/obsproject/obs-plugintemplate/wiki/Codesigning-On-macOS#setting-up-code-signing-for-github-actions).
+See [LICENSE](LICENSE).
