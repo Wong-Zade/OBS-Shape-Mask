@@ -9,14 +9,11 @@ uniform float2 uv_size;
 uniform float  feather;
 uniform float  corner_radius;
 uniform float rotation;
-uniform float polygon_sides;
-uniform float star_inner;
 uniform bool   mask_invert;
 uniform bool   use_source_mask;
 
 uniform bool   border_enabled;
 uniform float4 border_color;
-uniform float4 border_color2;
 uniform int   border_style;
 uniform float border_opacity;
 uniform float border_dash;
@@ -86,11 +83,6 @@ float sd_circle(float2 p, float r)
 	return length(p) - r;
 }
 
-float sd_ellipse(float2 p, float2 r)
-{
-	return (length(p / r) - 1.0) * min(r.x, r.y);
-}
-
 float sd_round_rect(float2 p, float2 half_size, float corner)
 {
 	float c = min(corner, min(half_size.x, half_size.y));
@@ -104,38 +96,15 @@ float sd_box(float2 p, float2 b)
 	return length(max(q, float2(0.0, 0.0))) + min(max(q.x, q.y), 0.0);
 }
 
-float sd_regular_polygon(float2 p, float sides, float radius)
-{
-	float a = atan2(p.y, p.x);
-	float sector = 6.28318530718 / max(sides, 3.0);
-	float h = cos(floor(0.5 + a / sector) * sector - a) * radius;
-	return length(p) * cos(sector * 0.5) - h;
-}
-
-float sd_star(float2 p, float radius, float inner)
-{
-	float a = atan2(p.y, p.x);
-	float r = length(p);
-	float sector = 6.28318530718 / 10.0;
-	float local = abs(frac((a + sector * 0.5) / sector) * sector - sector * 0.5);
-	float edge = lerp(radius * inner, radius, step(sector * 0.5, local));
-	return r - edge;
-}
-
 float shape_distance(float2 uv, float2 center, float2 scale, float corner)
 {
 	float2 p = shape_point(uv, center);
 	p = rotate_point(p, -rotation * 0.01745329252);
-	float r = 0.45 * min(scale.x, scale.y);
-	if (shape_type == 0) return sd_circle(p, r);
-	if (shape_type == 1) return sd_round_rect(p, float2(0.42,0.32)*scale, corner*min(scale.x,scale.y));
-	if (shape_type == 2) return sd_ellipse(p, float2(0.45,0.30)*scale);
-	if (shape_type == 3) return sd_regular_polygon(p, max(polygon_sides, 3.0), r);
-	if (shape_type == 4) return sd_box(p, float2(0.42,0.32)*scale);
-	if (shape_type == 5) return sd_regular_polygon(p, 3.0, r);
-	if (shape_type == 6) return sd_regular_polygon(p, 4.0, r);
-	if (shape_type == 7) return sd_regular_polygon(p, 8.0, r);
-	return sd_star(p, r, star_inner);
+	if (shape_type == 0)
+		return sd_circle(p, 0.45 * min(scale.x, scale.y));
+	if (shape_type == 1)
+		return sd_round_rect(p, float2(0.42, 0.32) * scale, corner * min(scale.x, scale.y));
+	return sd_box(p, float2(0.42, 0.32) * scale);
 }
 
 float4 PSShapeMask(VertData v_in) : TARGET
@@ -173,9 +142,7 @@ float4 PSShapeMask(VertData v_in) : TARGET
 		if(border_pulse) width*=1.0+pulse_amount*sin(time_seconds*pulse_speed);
 		float ring=1.0-smoothstep(0.0,width,abs(d));
 		float4 bc=border_color;
-		float bt=saturate(d/max(width,0.0005)*0.5+0.5);
-		if(border_style==1) bc=lerp(border_color,border_color2,bt);
-		if(border_style==2) { float2 bp=shape_point(v_in.uv,center); float a=atan2(bp.y,bp.x); ring*=step(0.5,frac((a+3.14159265)*border_dash/6.2831853)); }
+		if(border_style==1) { float2 bp=shape_point(v_in.uv,center); float a=atan2(bp.y,bp.x); ring*=step(0.5,frac((a+3.14159265)*border_dash/6.2831853)); }
 		float eg=(1.0-smoothstep(width,width*4.0,max(d,0.0)))*border_glow;
 		float ba=saturate(max(ring,eg*(1.0-ring)))*border_opacity*bc.a;
 		float na=ba+result.a*(1.0-ba); float3 nr=bc.rgb*ba+result.rgb*result.a*(1.0-ba);
