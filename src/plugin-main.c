@@ -15,15 +15,12 @@ OBS_MODULE_USE_DEFAULT_LOCALE("obs-shape-window", "en-US")
 #define SETTING_FEATHER       "feather"
 #define SETTING_CORNER_RADIUS "corner_radius"
 #define SETTING_ROTATION      "rotation"
-#define SETTING_SIDES         "polygon_sides"
-#define SETTING_STAR_INNER    "star_inner"
 #define SETTING_MASK_INVERT   "mask_invert"
 #define SETTING_MASK_MODE     "mask_mode"
 #define SETTING_MASK_SOURCE   "mask_source_name"
 
 #define SETTING_BORDER_ENABLE "border_enabled"
 #define SETTING_BORDER_COLOR  "border_color"
-#define SETTING_BORDER_COLOR2 "border_color2"
 #define SETTING_BORDER_STYLE  "border_style"
 #define SETTING_BORDER_WIDTH  "border_width"
 #define SETTING_BORDER_OPACITY "border_opacity"
@@ -56,19 +53,12 @@ OBS_MODULE_USE_DEFAULT_LOCALE("obs-shape-window", "en-US")
 enum shape_type {
 	SHAPE_CIRCLE = 0,
 	SHAPE_ROUNDED_RECT = 1,
-	SHAPE_ELLIPSE = 2,
-	SHAPE_HEXAGON = 3,
-	SHAPE_RECT = 4,
-	SHAPE_TRIANGLE = 5,
-	SHAPE_DIAMOND = 6,
-	SHAPE_OCTAGON = 7,
-	SHAPE_STAR = 8,
+	SHAPE_RECTANGLE = 2,
 };
 
 enum border_style {
 	BORDER_SOLID = 0,
-	BORDER_GRADIENT = 1,
-	BORDER_DASHED = 2,
+	BORDER_DASHED = 1,
 };
 
 enum animation_type {
@@ -97,15 +87,12 @@ struct shape_mask_filter {
 	gs_eparam_t *param_feather;
 	gs_eparam_t *param_corner_radius;
 	gs_eparam_t *param_rotation;
-	gs_eparam_t *param_polygon_sides;
-	gs_eparam_t *param_star_inner;
 	gs_eparam_t *param_mask_invert;
 	gs_eparam_t *param_use_source_mask;
 	gs_eparam_t *param_mask_image;
 
 	gs_eparam_t *param_border_enabled;
 	gs_eparam_t *param_border_color;
-	gs_eparam_t *param_border_color2;
 	gs_eparam_t *param_border_style;
 	gs_eparam_t *param_border_width;
 	gs_eparam_t *param_border_opacity;
@@ -139,8 +126,6 @@ struct shape_mask_filter {
 	float feather;
 	float corner_radius;
 	float rotation;
-	float polygon_sides;
-	float star_inner;
 	bool mask_invert;
 
 	int mask_mode;
@@ -150,7 +135,6 @@ struct shape_mask_filter {
 
 	bool border_enabled;
 	uint32_t border_color;
-	uint32_t border_color2;
 	int border_style;
 	float border_width;
 	float border_opacity;
@@ -248,8 +232,6 @@ static void shape_mask_update(void *data, obs_data_t *settings)
 	f->feather = (float)obs_data_get_double(settings, SETTING_FEATHER);
 	f->corner_radius = (float)obs_data_get_double(settings, SETTING_CORNER_RADIUS);
 	f->rotation = (float)obs_data_get_double(settings, SETTING_ROTATION);
-	f->polygon_sides = (float)obs_data_get_double(settings, SETTING_SIDES);
-	f->star_inner = (float)obs_data_get_double(settings, SETTING_STAR_INNER);
 	f->mask_invert = obs_data_get_bool(settings, SETTING_MASK_INVERT);
 	f->mask_mode = (int)obs_data_get_int(settings, SETTING_MASK_MODE);
 
@@ -262,7 +244,6 @@ static void shape_mask_update(void *data, obs_data_t *settings)
 
 	f->border_enabled = obs_data_get_bool(settings, SETTING_BORDER_ENABLE);
 	f->border_color = (uint32_t)obs_data_get_int(settings, SETTING_BORDER_COLOR);
-	f->border_color2 = (uint32_t)obs_data_get_int(settings, SETTING_BORDER_COLOR2);
 	f->border_style = (int)obs_data_get_int(settings, SETTING_BORDER_STYLE);
 	f->border_width = (float)obs_data_get_double(settings, SETTING_BORDER_WIDTH);
 	f->border_opacity = (float)obs_data_get_double(settings, SETTING_BORDER_OPACITY);
@@ -293,8 +274,6 @@ static void shape_mask_update(void *data, obs_data_t *settings)
 	f->feather = clampf(f->feather, 0.0f, 0.20f);
 	f->corner_radius = clampf(f->corner_radius, 0.0f, 0.50f);
 	f->rotation = clampf(f->rotation, -180.0f, 180.0f);
-	f->polygon_sides = clampf(f->polygon_sides, 3.0f, 12.0f);
-	f->star_inner = clampf(f->star_inner, 0.05f, 0.95f);
 	f->border_width = clampf(f->border_width, 0.0f, 0.12f);
 	f->border_opacity = clampf(f->border_opacity, 0.0f, 1.0f);
 	f->border_dash = clampf(f->border_dash, 0.5f, 20.0f);
@@ -338,15 +317,12 @@ static void *shape_mask_create(obs_data_t *settings, obs_source_t *source)
 	f->param_feather = gs_effect_get_param_by_name(f->effect, "feather");
 	f->param_corner_radius = gs_effect_get_param_by_name(f->effect, "corner_radius");
 	f->param_rotation = gs_effect_get_param_by_name(f->effect, "rotation");
-	f->param_polygon_sides = gs_effect_get_param_by_name(f->effect, "polygon_sides");
-	f->param_star_inner = gs_effect_get_param_by_name(f->effect, "star_inner");
 	f->param_mask_invert = gs_effect_get_param_by_name(f->effect, "mask_invert");
 	f->param_use_source_mask = gs_effect_get_param_by_name(f->effect, "use_source_mask");
 	f->param_mask_image = gs_effect_get_param_by_name(f->effect, "mask_image");
 
 	f->param_border_enabled = gs_effect_get_param_by_name(f->effect, "border_enabled");
 	f->param_border_color = gs_effect_get_param_by_name(f->effect, "border_color");
-	f->param_border_color2 = gs_effect_get_param_by_name(f->effect, "border_color2");
 	f->param_border_style = gs_effect_get_param_by_name(f->effect, "border_style");
 	f->param_border_width = gs_effect_get_param_by_name(f->effect, "border_width");
 	f->param_border_opacity = gs_effect_get_param_by_name(f->effect, "border_opacity");
@@ -534,10 +510,8 @@ static void shape_mask_video_render(void *data, gs_effect_t *unused_effect)
 	vec2_set(&scale, f->scale_x * anim_scale, f->scale_y * anim_scale);
 
 	struct vec4 border_color;
-	struct vec4 border_color2;
 	struct vec4 glow_color;
 	vec4_from_rgba(&border_color, f->border_color);
-	vec4_from_rgba(&border_color2, f->border_color2);
 	vec4_from_rgba(&glow_color, f->glow_color);
 
 	struct vec2 shadow_offset;
@@ -553,8 +527,6 @@ static void shape_mask_video_render(void *data, gs_effect_t *unused_effect)
 	gs_effect_set_float(f->param_feather, f->feather);
 	gs_effect_set_float(f->param_corner_radius, f->corner_radius);
 	gs_effect_set_float(f->param_rotation, f->rotation);
-	gs_effect_set_float(f->param_polygon_sides, f->polygon_sides);
-	gs_effect_set_float(f->param_star_inner, f->star_inner);
 	gs_effect_set_bool(f->param_mask_invert, f->mask_invert);
 	gs_effect_set_bool(f->param_use_source_mask, use_source_mask);
 
@@ -568,7 +540,6 @@ static void shape_mask_video_render(void *data, gs_effect_t *unused_effect)
 	   source mask doesn't have, so it's skipped in that mode. */
 	gs_effect_set_bool(f->param_border_enabled, f->border_enabled && !use_source_mask);
 	gs_effect_set_vec4(f->param_border_color, &border_color);
-	gs_effect_set_vec4(f->param_border_color2, &border_color2);
 	gs_effect_set_int(f->param_border_style, f->border_style);
 	gs_effect_set_float(f->param_border_width, f->border_width);
 	gs_effect_set_float(f->param_border_opacity, f->border_opacity);
@@ -728,13 +699,7 @@ static obs_properties_t *shape_mask_properties(void *data)
 
 	obs_property_list_add_int(shape_list, obs_module_text("ShapeMask.Shape.Circle"), SHAPE_CIRCLE);
 	obs_property_list_add_int(shape_list, obs_module_text("ShapeMask.Shape.RoundedRect"), SHAPE_ROUNDED_RECT);
-	obs_property_list_add_int(shape_list, obs_module_text("ShapeMask.Shape.Ellipse"), SHAPE_ELLIPSE);
-	obs_property_list_add_int(shape_list, obs_module_text("ShapeMask.Shape.Hexagon"), SHAPE_HEXAGON);
-	obs_property_list_add_int(shape_list, obs_module_text("ShapeMask.Shape.Rectangle"), SHAPE_RECT);
-	obs_property_list_add_int(shape_list, obs_module_text("ShapeMask.Shape.Triangle"), SHAPE_TRIANGLE);
-	obs_property_list_add_int(shape_list, obs_module_text("ShapeMask.Shape.Diamond"), SHAPE_DIAMOND);
-	obs_property_list_add_int(shape_list, obs_module_text("ShapeMask.Shape.Octagon"), SHAPE_OCTAGON);
-	obs_property_list_add_int(shape_list, obs_module_text("ShapeMask.Shape.Star"), SHAPE_STAR);
+	obs_property_list_add_int(shape_list, obs_module_text("ShapeMask.Shape.Rectangle"), SHAPE_RECTANGLE);
 
 	obs_property_set_modified_callback(shape_list, shape_modified);
 
@@ -753,9 +718,6 @@ static obs_properties_t *shape_mask_properties(void *data)
 					 0.5, 0.005);
 	obs_properties_add_float_slider(props, SETTING_ROTATION, obs_module_text("ShapeMask.Rotation"), -180.0,
 					 180.0, 1.0);
-	obs_properties_add_int_slider(props, SETTING_SIDES, obs_module_text("ShapeMask.PolygonSides"), 3, 12, 1);
-	obs_properties_add_float_slider(props, SETTING_STAR_INNER, obs_module_text("ShapeMask.StarInner"), 0.05,
-					 0.95, 0.01);
 
 	obs_properties_add_bool(props, SETTING_MASK_INVERT, obs_module_text("ShapeMask.MaskInvert"));
 
@@ -763,12 +725,10 @@ static obs_properties_t *shape_mask_properties(void *data)
 		obs_properties_add_bool(props, SETTING_BORDER_ENABLE, obs_module_text("ShapeMask.BorderEnable"));
 
 	obs_properties_add_color(props, SETTING_BORDER_COLOR, obs_module_text("ShapeMask.BorderColor"));
-	obs_properties_add_color(props, SETTING_BORDER_COLOR2, obs_module_text("ShapeMask.BorderColor2"));
 	obs_property_t *border_style = obs_properties_add_list(props, SETTING_BORDER_STYLE,
 									 obs_module_text("ShapeMask.BorderStyle"),
 									 OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
 	obs_property_list_add_int(border_style, obs_module_text("ShapeMask.Border.Solid"), BORDER_SOLID);
-	obs_property_list_add_int(border_style, obs_module_text("ShapeMask.Border.Gradient"), BORDER_GRADIENT);
 	obs_property_list_add_int(border_style, obs_module_text("ShapeMask.Border.Dashed"), BORDER_DASHED);
 
 	obs_properties_add_float_slider(props, SETTING_BORDER_WIDTH, obs_module_text("ShapeMask.BorderWidth"), 0.0,
@@ -859,14 +819,11 @@ static void shape_mask_defaults(obs_data_t *settings)
 
 	obs_data_set_default_double(settings, SETTING_CORNER_RADIUS, 0.08);
 	obs_data_set_default_double(settings, SETTING_ROTATION, 0.0);
-	obs_data_set_default_int(settings, SETTING_SIDES, 6);
-	obs_data_set_default_double(settings, SETTING_STAR_INNER, 0.45);
 
 	obs_data_set_default_bool(settings, SETTING_MASK_INVERT, false);
 
 	obs_data_set_default_bool(settings, SETTING_BORDER_ENABLE, false);
 	obs_data_set_default_int(settings, SETTING_BORDER_COLOR, 0xFFFFFFFF);
-	obs_data_set_default_int(settings, SETTING_BORDER_COLOR2, 0xFF00FFFF);
 	obs_data_set_default_int(settings, SETTING_BORDER_STYLE, BORDER_SOLID);
 	obs_data_set_default_double(settings, SETTING_BORDER_WIDTH, 0.008);
 	obs_data_set_default_double(settings, SETTING_BORDER_OPACITY, 1.0);
