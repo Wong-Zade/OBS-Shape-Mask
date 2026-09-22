@@ -96,10 +96,10 @@ float sd_box(float2 p, float2 b)
 	return length(max(q, float2(0.0, 0.0))) + min(max(q.x, q.y), 0.0);
 }
 
-float shape_distance(float2 uv, float2 center, float2 scale, float corner)
+float shape_distance(float2 uv, float2 center, float2 scale, float corner, float extra_rot_deg)
 {
 	float2 p = shape_point(uv, center);
-	p = rotate_point(p, -rotation * 0.01745329252);
+	p = rotate_point(p, -(rotation + extra_rot_deg) * 0.01745329252);
 	if (shape_type == 0)
 		return sd_circle(p, 0.45 * min(scale.x, scale.y));
 	if (shape_type == 1)
@@ -120,17 +120,21 @@ float4 PSShapeMask(VertData v_in) : TARGET
 	if (animation == 1) anim_scale += anim*animation_amount*0.15;
 	if (animation == 2) anim_scale += (anim*0.5+0.5)*animation_amount*0.12;
 	if (animation == 6) anim_scale += anim*animation_amount*0.20;
+	/* Continuous spin: degrees advance every frame based on elapsed time,
+	   animation speed, and amount -- independent of the static Rotation
+	   slider, which is added on top inside shape_distance. */
+	float anim_rotation = (animation == 3) ? t * animation_amount * 60.0 : 0.0;
 	float2 render_scale = shape_scale * anim_scale;
 	float d=0.0;
 	float fill_alpha;
 	if (use_source_mask) fill_alpha = mask_image.Sample(mask_sampler,v_in.uv).a;
-	else { d=shape_distance(v_in.uv,center+animated_offset,render_scale,corner_radius); fill_alpha=saturate(1.0-smoothstep(0.0,max(feather,0.001),d)); }
+	else { d=shape_distance(v_in.uv,center+animated_offset,render_scale,corner_radius,anim_rotation); fill_alpha=saturate(1.0-smoothstep(0.0,max(feather,0.001),d)); }
 	if (mask_invert) fill_alpha=1.0-fill_alpha;
 	float4 result=float4(src.rgb,src.a*saturate(fill_alpha));
 	if (shadow_enabled) {
 		float shadow_alpha;
 		if (use_source_mask) shadow_alpha=mask_image.Sample(mask_sampler,v_in.uv-shadow_offset).a;
-		else { float sd=shape_distance(v_in.uv,center+shadow_offset+animated_offset,render_scale,corner_radius); shadow_alpha=saturate(1.0-smoothstep(0.0,max(shadow_blur,0.001),sd)); }
+		else { float sd=shape_distance(v_in.uv,center+shadow_offset+animated_offset,render_scale,corner_radius,anim_rotation); shadow_alpha=saturate(1.0-smoothstep(0.0,max(shadow_blur,0.001),sd)); }
 		if(mask_invert) shadow_alpha=1.0-shadow_alpha;
 		shadow_alpha*=shadow_opacity*shadow_color.a;
 		float na=shadow_alpha+result.a*(1.0-shadow_alpha);
