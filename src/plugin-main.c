@@ -23,6 +23,7 @@ OBS_MODULE_USE_DEFAULT_LOCALE("obs-shape-window", "en-US")
 #define SETTING_BORDER_COLOR  "border_color"
 #define SETTING_BORDER_STYLE  "border_style"
 #define SETTING_BORDER_WIDTH  "border_width"
+#define SETTING_BORDER_SOFT   "border_softness"
 #define SETTING_BORDER_OPACITY "border_opacity"
 #define SETTING_BORDER_DASH   "border_dash"
 #define SETTING_BORDER_GLOW   "border_glow"
@@ -95,6 +96,7 @@ struct shape_mask_filter {
 	gs_eparam_t *param_border_color;
 	gs_eparam_t *param_border_style;
 	gs_eparam_t *param_border_width;
+	gs_eparam_t *param_border_softness;
 	gs_eparam_t *param_border_opacity;
 	gs_eparam_t *param_border_dash;
 	gs_eparam_t *param_border_glow;
@@ -137,6 +139,7 @@ struct shape_mask_filter {
 	uint32_t border_color;
 	int border_style;
 	float border_width;
+	float border_softness;
 	float border_opacity;
 	float border_dash;
 	float border_glow;
@@ -246,6 +249,7 @@ static void shape_mask_update(void *data, obs_data_t *settings)
 	f->border_color = (uint32_t)obs_data_get_int(settings, SETTING_BORDER_COLOR);
 	f->border_style = (int)obs_data_get_int(settings, SETTING_BORDER_STYLE);
 	f->border_width = (float)obs_data_get_double(settings, SETTING_BORDER_WIDTH);
+	f->border_softness = (float)obs_data_get_double(settings, SETTING_BORDER_SOFT);
 	f->border_opacity = (float)obs_data_get_double(settings, SETTING_BORDER_OPACITY);
 	f->border_dash = (float)obs_data_get_double(settings, SETTING_BORDER_DASH);
 	f->border_glow = (float)obs_data_get_double(settings, SETTING_BORDER_GLOW);
@@ -275,6 +279,7 @@ static void shape_mask_update(void *data, obs_data_t *settings)
 	f->corner_radius = clampf(f->corner_radius, 0.0f, 0.50f);
 	f->rotation = clampf(f->rotation, -180.0f, 180.0f);
 	f->border_width = clampf(f->border_width, 0.0f, 0.12f);
+	f->border_softness = clampf(f->border_softness, 0.0f, 0.05f);
 	f->border_opacity = clampf(f->border_opacity, 0.0f, 1.0f);
 	f->border_dash = clampf(f->border_dash, 0.5f, 20.0f);
 	f->border_glow = clampf(f->border_glow, 0.0f, 1.0f);
@@ -325,6 +330,7 @@ static void *shape_mask_create(obs_data_t *settings, obs_source_t *source)
 	f->param_border_color = gs_effect_get_param_by_name(f->effect, "border_color");
 	f->param_border_style = gs_effect_get_param_by_name(f->effect, "border_style");
 	f->param_border_width = gs_effect_get_param_by_name(f->effect, "border_width");
+	f->param_border_softness = gs_effect_get_param_by_name(f->effect, "border_softness");
 	f->param_border_opacity = gs_effect_get_param_by_name(f->effect, "border_opacity");
 	f->param_border_dash = gs_effect_get_param_by_name(f->effect, "border_dash");
 	f->param_border_glow = gs_effect_get_param_by_name(f->effect, "border_glow");
@@ -542,6 +548,7 @@ static void shape_mask_video_render(void *data, gs_effect_t *unused_effect)
 	gs_effect_set_vec4(f->param_border_color, &border_color);
 	gs_effect_set_int(f->param_border_style, f->border_style);
 	gs_effect_set_float(f->param_border_width, f->border_width);
+	gs_effect_set_float(f->param_border_softness, f->border_softness);
 	gs_effect_set_float(f->param_border_opacity, f->border_opacity);
 	gs_effect_set_float(f->param_border_dash, f->border_dash);
 	gs_effect_set_float(f->param_border_glow, f->border_glow);
@@ -576,6 +583,7 @@ static bool border_enabled_modified(obs_properties_t *props, obs_property_t *pro
 
 	obs_property_set_visible(obs_properties_get(props, SETTING_BORDER_COLOR), enabled);
 	obs_property_set_visible(obs_properties_get(props, SETTING_BORDER_WIDTH), enabled);
+	obs_property_set_visible(obs_properties_get(props, SETTING_BORDER_SOFT), enabled);
 	obs_property_set_visible(obs_properties_get(props, SETTING_BORDER_GLOW), enabled);
 	obs_property_set_visible(obs_properties_get(props, SETTING_BORDER_PULSE), enabled);
 
@@ -651,6 +659,7 @@ static bool mask_mode_modified(obs_properties_t *props, obs_property_t *prop, ob
 		   of the border_enabled setting underneath. */
 		obs_property_set_visible(obs_properties_get(props, SETTING_BORDER_COLOR), false);
 		obs_property_set_visible(obs_properties_get(props, SETTING_BORDER_WIDTH), false);
+		obs_property_set_visible(obs_properties_get(props, SETTING_BORDER_SOFT), false);
 		obs_property_set_visible(obs_properties_get(props, SETTING_BORDER_GLOW), false);
 		obs_property_set_visible(obs_properties_get(props, SETTING_BORDER_PULSE), false);
 		obs_property_set_visible(obs_properties_get(props, SETTING_PULSE_SPEED), false);
@@ -733,6 +742,8 @@ static obs_properties_t *shape_mask_properties(void *data)
 
 	obs_properties_add_float_slider(props, SETTING_BORDER_WIDTH, obs_module_text("ShapeMask.BorderWidth"), 0.0,
 					 0.12, 0.001);
+	obs_properties_add_float_slider(props, SETTING_BORDER_SOFT, obs_module_text("ShapeMask.BorderSoftness"), 0.0,
+					 0.05, 0.001);
 	obs_properties_add_float_slider(props, SETTING_BORDER_OPACITY, obs_module_text("ShapeMask.BorderOpacity"), 0.0,
 					 1.0, 0.01);
 	obs_properties_add_float_slider(props, SETTING_BORDER_DASH, obs_module_text("ShapeMask.BorderDash"), 0.5,
@@ -826,6 +837,7 @@ static void shape_mask_defaults(obs_data_t *settings)
 	obs_data_set_default_int(settings, SETTING_BORDER_COLOR, 0xFFFFFFFF);
 	obs_data_set_default_int(settings, SETTING_BORDER_STYLE, BORDER_SOLID);
 	obs_data_set_default_double(settings, SETTING_BORDER_WIDTH, 0.008);
+	obs_data_set_default_double(settings, SETTING_BORDER_SOFT, 0.0015);
 	obs_data_set_default_double(settings, SETTING_BORDER_OPACITY, 1.0);
 	obs_data_set_default_double(settings, SETTING_BORDER_DASH, 6.0);
 	obs_data_set_default_double(settings, SETTING_BORDER_GLOW, 0.20);
