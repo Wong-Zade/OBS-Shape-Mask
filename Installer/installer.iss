@@ -17,7 +17,9 @@ ArchitecturesInstallIn64BitMode=x64compatible
 SetupIconFile=icon.ico
 WizardImageFile=wizard_large.bmp
 WizardSmallImageFile=wizard_small.bmp
-WizardImageStretch=no
+; Inno Setup skips the Welcome page by default, which would hide the large banner
+; until the very last page. Turn it on so the banner shows from the start.
+DisableWelcomePage=no
 
 [Files]
 ; The plugin DLL and ALL of its data files (effect + locale) -- fixing the
