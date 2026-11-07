@@ -57,33 +57,34 @@ if(OS_WINDOWS)
       "${ONNXRUNTIME_ROOT}/ThirdPartyNotices.txt"
     DESTINATION "${CMAKE_PROJECT_NAME}/data/licenses"
   )
+  set(rundir "${CMAKE_CURRENT_BINARY_DIR}/rundir/$<CONFIG>/${CMAKE_PROJECT_NAME}")
+  set(rundir_plugin_bin "${CMAKE_CURRENT_BINARY_DIR}/rundir/$<CONFIG>/obs-plugins/64bit")
   add_custom_command(
     TARGET ${CMAKE_PROJECT_NAME}
     POST_BUILD
-    COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/rundir/$<CONFIG>/${CMAKE_PROJECT_NAME}"
-    COMMAND
-      "${CMAKE_COMMAND}" -E copy_if_different "${YUNET_MODEL}"
-      "${CMAKE_CURRENT_BINARY_DIR}/rundir/$<CONFIG>/${CMAKE_PROJECT_NAME}/yunet.onnx"
     COMMAND
       "${CMAKE_COMMAND}" -E make_directory
-      "${CMAKE_CURRENT_BINARY_DIR}/rundir/$<CONFIG>/${CMAKE_PROJECT_NAME}/licenses"
+      "${rundir}"
+    COMMAND
+      "${CMAKE_COMMAND}" -E copy_if_different "${YUNET_MODEL}" "${rundir}/yunet.onnx"
+    COMMAND
+      "${CMAKE_COMMAND}" -E make_directory "${rundir}/licenses"
     COMMAND
       "${CMAKE_COMMAND}" -E copy_if_different "${ONNXRUNTIME_ROOT}/LICENSE"
-      "${CMAKE_CURRENT_BINARY_DIR}/rundir/$<CONFIG>/${CMAKE_PROJECT_NAME}/licenses/onnxruntime-LICENSE.txt"
+      "${rundir}/licenses/onnxruntime-LICENSE.txt"
     COMMAND
       "${CMAKE_COMMAND}" -E copy_if_different "${ONNXRUNTIME_ROOT}/ThirdPartyNotices.txt"
-      "${CMAKE_CURRENT_BINARY_DIR}/rundir/$<CONFIG>/${CMAKE_PROJECT_NAME}/licenses/onnxruntime-ThirdPartyNotices.txt"
+      "${rundir}/licenses/onnxruntime-ThirdPartyNotices.txt"
     COMMAND
-      "${CMAKE_COMMAND}" -E make_directory
-      "${CMAKE_CURRENT_BINARY_DIR}/rundir/$<CONFIG>/obs-plugins/64bit"
+      "${CMAKE_COMMAND}" -E make_directory "${rundir_plugin_bin}"
     COMMAND
       "${CMAKE_COMMAND}" -E copy_if_different
       "${ONNXRUNTIME_ROOT}/runtimes/win-x64/native/onnxruntime.dll"
-      "${CMAKE_CURRENT_BINARY_DIR}/rundir/$<CONFIG>/obs-plugins/64bit/onnxruntime.dll"
+      "${rundir_plugin_bin}/onnxruntime.dll"
     COMMAND
       "${CMAKE_COMMAND}" -E copy_if_different
       "${ONNXRUNTIME_ROOT}/runtimes/win-x64/native/onnxruntime_providers_shared.dll"
-      "${CMAKE_CURRENT_BINARY_DIR}/rundir/$<CONFIG>/obs-plugins/64bit/onnxruntime_providers_shared.dll"
+      "${rundir_plugin_bin}/onnxruntime_providers_shared.dll"
     COMMENT "Copy face detection model to rundir"
     VERBATIM
   )

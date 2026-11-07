@@ -21,7 +21,10 @@ function(_check_dependencies_windows)
   _check_dependencies()
 
   set(onnxruntime_version "1.22.0")
-  set(onnxruntime_archive "${dependencies_dir}/microsoft.ml.onnxruntime.directml.${onnxruntime_version}.nupkg")
+  set(
+    onnxruntime_archive
+    "${dependencies_dir}/microsoft.ml.onnxruntime.directml.${onnxruntime_version}.nupkg"
+  )
   set(onnxruntime_url
       "https://api.nuget.org/v3-flatcontainer/microsoft.ml.onnxruntime.directml/${onnxruntime_version}/microsoft.ml.onnxruntime.directml.${onnxruntime_version}.nupkg"
   )
@@ -62,7 +65,10 @@ function(_check_dependencies_windows)
   set(yunet_model "${dependencies_dir}/face_detection_yunet_2023mar.onnx")
   if(EXISTS "${yunet_model}")
     file(SHA256 "${yunet_model}" existing_yunet_hash)
-    if(NOT existing_yunet_hash STREQUAL "8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4")
+    if(
+      NOT existing_yunet_hash STREQUAL
+      "8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4"
+    )
       file(REMOVE "${yunet_model}")
     endif()
   endif()

@@ -240,13 +240,10 @@ static bool shape_mask_convert_frame(const struct obs_source_frame *frame, uint8
 					   frame->full_range, pixel);
 				break;
 			}
-			case VIDEO_FORMAT_I420:
-			case VIDEO_FORMAT_YV12: {
-				uint32_t u_plane = frame->format == VIDEO_FORMAT_I420 ? 1 : 2;
-				uint32_t v_plane = frame->format == VIDEO_FORMAT_I420 ? 2 : 1;
+			case VIDEO_FORMAT_I420: {
 				uint8_t luma = frame->data[0][(size_t)y * frame->linesize[0] + x];
-				uint8_t u = frame->data[u_plane][(size_t)(y / 2) * frame->linesize[u_plane] + x / 2];
-				uint8_t v = frame->data[v_plane][(size_t)(y / 2) * frame->linesize[v_plane] + x / 2];
+				uint8_t u = frame->data[1][(size_t)(y / 2) * frame->linesize[1] + x / 2];
+				uint8_t v = frame->data[2][(size_t)(y / 2) * frame->linesize[2] + x / 2];
 				yuv_to_bgr(luma, u, v, frame->full_range, pixel);
 				break;
 			}
@@ -531,7 +528,7 @@ static void *shape_mask_create(obs_data_t *settings, obs_source_t *source)
 #endif
 
 	f->anim_hotkey = obs_hotkey_register_source(source, HOTKEY_POP_ANIM, obs_module_text("ShapeMask.PopHotkey"),
-						      shape_mask_trigger_pop, f);
+						    shape_mask_trigger_pop, f);
 
 	shape_mask_update(f, settings);
 	return f;
@@ -902,20 +899,20 @@ static obs_properties_t *shape_mask_properties(void *data)
 	obs_properties_t *props = obs_properties_create();
 
 	obs_property_t *mode_list = obs_properties_add_list(props, SETTING_MASK_MODE,
-							      obs_module_text("ShapeMask.MaskMode"),
-							      OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
+							    obs_module_text("ShapeMask.MaskMode"), OBS_COMBO_TYPE_LIST,
+							    OBS_COMBO_FORMAT_INT);
 	obs_property_list_add_int(mode_list, obs_module_text("ShapeMask.MaskMode.Shape"), MASK_MODE_SHAPE);
 	obs_property_list_add_int(mode_list, obs_module_text("ShapeMask.MaskMode.Source"), MASK_MODE_SOURCE);
 	obs_property_set_modified_callback(mode_list, mask_mode_modified);
 
 	obs_property_t *mask_source_list = obs_properties_add_list(props, SETTING_MASK_SOURCE,
-								     obs_module_text("ShapeMask.MaskSource"),
-								     OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_STRING);
+								   obs_module_text("ShapeMask.MaskSource"),
+								   OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_STRING);
 	obs_property_list_add_string(mask_source_list, obs_module_text("ShapeMask.MaskSource.None"), "");
 	obs_enum_sources(enum_source_add, mask_source_list);
 
 	obs_property_t *shape_list = obs_properties_add_list(props, SETTING_SHAPE, obs_module_text("ShapeMask.Shape"),
-							       OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
+							     OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
 
 	obs_property_list_add_int(shape_list, obs_module_text("ShapeMask.Shape.Circle"), SHAPE_CIRCLE);
 	obs_property_list_add_int(shape_list, obs_module_text("ShapeMask.Shape.RoundedRect"), SHAPE_ROUNDED_RECT);
@@ -939,13 +936,12 @@ static obs_properties_t *shape_mask_properties(void *data)
 	obs_property_set_modified_callback(face_follow, face_follow_modified);
 #endif
 
-	obs_properties_add_float_slider(props, SETTING_FEATHER, obs_module_text("ShapeMask.Feather"), 0.0, 0.20,
-					 0.002);
+	obs_properties_add_float_slider(props, SETTING_FEATHER, obs_module_text("ShapeMask.Feather"), 0.0, 0.20, 0.002);
 
 	obs_properties_add_float_slider(props, SETTING_CORNER_RADIUS, obs_module_text("ShapeMask.CornerRadius"), 0.0,
-					 0.5, 0.005);
-	obs_properties_add_float_slider(props, SETTING_ROTATION, obs_module_text("ShapeMask.Rotation"), -180.0,
-					 180.0, 1.0);
+					0.5, 0.005);
+	obs_properties_add_float_slider(props, SETTING_ROTATION, obs_module_text("ShapeMask.Rotation"), -180.0, 180.0,
+					1.0);
 
 	obs_properties_add_bool(props, SETTING_MASK_INVERT, obs_module_text("ShapeMask.MaskInvert"));
 
@@ -955,41 +951,41 @@ static obs_properties_t *shape_mask_properties(void *data)
 	obs_properties_add_color(props, SETTING_BORDER_COLOR, obs_module_text("ShapeMask.BorderColor"));
 
 	obs_properties_add_float_slider(props, SETTING_BORDER_WIDTH, obs_module_text("ShapeMask.BorderWidth"), 0.0,
-					 0.12, 0.001);
+					0.12, 0.001);
 	obs_properties_add_float_slider(props, SETTING_BORDER_SOFT, obs_module_text("ShapeMask.BorderSoftness"), 0.0,
-					 0.05, 0.001);
+					0.05, 0.001);
 	obs_properties_add_float_slider(props, SETTING_BORDER_OPACITY, obs_module_text("ShapeMask.BorderOpacity"), 0.0,
-					 1.0, 0.01);
+					1.0, 0.01);
 
-	obs_properties_add_float_slider(props, SETTING_BORDER_GLOW, obs_module_text("ShapeMask.BorderGlow"), 0.0,
-					 1.0, 0.01);
+	obs_properties_add_float_slider(props, SETTING_BORDER_GLOW, obs_module_text("ShapeMask.BorderGlow"), 0.0, 1.0,
+					0.01);
 
 	obs_property_t *border_pulse =
 		obs_properties_add_bool(props, SETTING_BORDER_PULSE, obs_module_text("ShapeMask.BorderPulse"));
 
-	obs_properties_add_float_slider(props, SETTING_PULSE_SPEED, obs_module_text("ShapeMask.PulseSpeed"), 0.1,
-					 12.0, 0.1);
+	obs_properties_add_float_slider(props, SETTING_PULSE_SPEED, obs_module_text("ShapeMask.PulseSpeed"), 0.1, 12.0,
+					0.1);
 
-	obs_properties_add_float_slider(props, SETTING_PULSE_AMOUNT, obs_module_text("ShapeMask.PulseAmount"), 0.0,
-					 1.0, 0.05);
+	obs_properties_add_float_slider(props, SETTING_PULSE_AMOUNT, obs_module_text("ShapeMask.PulseAmount"), 0.0, 1.0,
+					0.05);
 
 	obs_property_t *shadow_enable =
 		obs_properties_add_bool(props, SETTING_SHADOW_ENABLE, obs_module_text("ShapeMask.ShadowEnable"));
 
 	obs_properties_add_color(props, SETTING_SHADOW_COLOR, obs_module_text("ShapeMask.ShadowColor"));
 
-	obs_properties_add_float_slider(props, SETTING_SHADOW_OFFSETX, obs_module_text("ShapeMask.ShadowOffsetX"),
-					 -0.3, 0.3, 0.005);
-	obs_properties_add_float_slider(props, SETTING_SHADOW_OFFSETY, obs_module_text("ShapeMask.ShadowOffsetY"),
-					 -0.3, 0.3, 0.005);
+	obs_properties_add_float_slider(props, SETTING_SHADOW_OFFSETX, obs_module_text("ShapeMask.ShadowOffsetX"), -0.3,
+					0.3, 0.005);
+	obs_properties_add_float_slider(props, SETTING_SHADOW_OFFSETY, obs_module_text("ShapeMask.ShadowOffsetY"), -0.3,
+					0.3, 0.005);
 	obs_properties_add_float_slider(props, SETTING_SHADOW_BLUR, obs_module_text("ShapeMask.ShadowBlur"), 0.001,
-					 0.25, 0.002);
-	obs_properties_add_float_slider(props, SETTING_SHADOW_OPACITY, obs_module_text("ShapeMask.ShadowOpacity"),
-					 0.0, 1.0, 0.01);
+					0.25, 0.002);
+	obs_properties_add_float_slider(props, SETTING_SHADOW_OPACITY, obs_module_text("ShapeMask.ShadowOpacity"), 0.0,
+					1.0, 0.01);
 
 	obs_property_t *animation = obs_properties_add_list(props, SETTING_ANIMATION,
-							      obs_module_text("ShapeMask.Animation"),
-							      OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
+							    obs_module_text("ShapeMask.Animation"), OBS_COMBO_TYPE_LIST,
+							    OBS_COMBO_FORMAT_INT);
 	obs_property_list_add_int(animation, obs_module_text("ShapeMask.Animation.None"), ANIM_NONE);
 	obs_property_list_add_int(animation, obs_module_text("ShapeMask.Animation.Pulse"), ANIM_PULSE);
 	obs_property_list_add_int(animation, obs_module_text("ShapeMask.Animation.Breathe"), ANIM_BREATHE);
@@ -998,9 +994,9 @@ static obs_properties_t *shape_mask_properties(void *data)
 	obs_property_list_add_int(animation, obs_module_text("ShapeMask.Animation.Shake"), ANIM_SHAKE);
 	obs_property_list_add_int(animation, obs_module_text("ShapeMask.Animation.Scale"), ANIM_SCALE);
 	obs_properties_add_float_slider(props, SETTING_ANIM_SPEED, obs_module_text("ShapeMask.AnimationSpeed"), 0.0,
-					 10.0, 0.1);
+					10.0, 0.1);
 	obs_properties_add_float_slider(props, SETTING_ANIM_AMOUNT, obs_module_text("ShapeMask.AnimationAmount"), 0.0,
-					 1.0, 0.01);
+					1.0, 0.01);
 
 	obs_property_set_modified_callback(border_enable, border_enabled_modified);
 	obs_property_set_modified_callback(border_pulse, border_pulse_modified);
@@ -1099,6 +1095,4 @@ bool obs_module_load(void)
 	return true;
 }
 
-void obs_module_unload(void)
-{
-}
+void obs_module_unload(void) {}
