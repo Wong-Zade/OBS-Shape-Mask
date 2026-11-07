@@ -3,7 +3,8 @@ param(
     [ValidateSet('x64')]
     [string] $Target = 'x64',
     [ValidateSet('Debug', 'RelWithDebInfo', 'Release', 'MinSizeRel')]
-    [string] $Configuration = 'RelWithDebInfo'
+    [string] $Configuration = 'RelWithDebInfo',
+    [switch] $Package
 )
 
 $ErrorActionPreference = 'Stop'
@@ -67,6 +68,56 @@ function Package {
     }
     Compress-Archive -Force @CompressArgs
     Log-Group
+
+    if ($Package) {
+        $PluginInstallPath = Join-Path "${ProjectRoot}/release/${Configuration}" $ProductName
+        $PluginBinaryPath = Join-Path $PluginInstallPath 'bin/64bit'
+        $PluginDataPath = Join-Path $PluginInstallPath 'data'
+
+        if (!(Test-Path -Path $PluginBinaryPath -PathType Container)) {
+            throw "Plugin binaries were not found at ${PluginBinaryPath}."
+        }
+        if (!(Test-Path -Path $PluginDataPath -PathType Container)) {
+            throw "Plugin data files were not found at ${PluginDataPath}."
+        }
+
+        $StageRoot = Join-Path "${ProjectRoot}/Installer/stage" $Configuration
+        if (Test-Path -Path $StageRoot) {
+            Remove-Item -Path $StageRoot -Recurse -Force
+        }
+
+        $StageBinaryPath = Join-Path $StageRoot 'obs-plugins/64bit'
+        $StageDataPath = Join-Path $StageRoot "data/obs-plugins/${ProductName}"
+        New-Item -ItemType Directory -Path $StageBinaryPath, $StageDataPath -Force | Out-Null
+        Copy-Item -Path (Join-Path $PluginBinaryPath '*') -Destination $StageBinaryPath -Recurse -Force
+        Copy-Item -Path (Join-Path $PluginDataPath '*') -Destination $StageDataPath -Recurse -Force
+
+        $IsccCommand = Get-Command 'ISCC.exe' -ErrorAction SilentlyContinue
+        $IsccPath = if ($IsccCommand) { $IsccCommand.Source } else { $null }
+        if (!$IsccPath) {
+            $IsccCandidates = @(
+                (Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6/ISCC.exe'),
+                (Join-Path $env:ProgramFiles 'Inno Setup 6/ISCC.exe')
+            )
+            $IsccPath = $IsccCandidates | Where-Object { Test-Path -Path $_ -PathType Leaf } | Select-Object -First 1
+        }
+        if (!$IsccPath) {
+            throw 'Inno Setup 6 compiler (ISCC.exe) was not found. Install Inno Setup 6 to create the Windows installer.'
+        }
+
+        $InstallerScript = Join-Path $ProjectRoot 'Installer/installer.iss'
+        $InstallerArgs = @(
+            "/DVersion=${ProductVersion}",
+            "/DProductName=${ProductName}",
+            "/DStageDir=stage\${Configuration}",
+            "/O${ProjectRoot}/release",
+            $InstallerScript
+        )
+
+        Log-Group "Creating Windows installer..."
+        Invoke-External $IsccPath @InstallerArgs
+        Log-Group
+    }
 }
 
 Package

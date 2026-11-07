@@ -41,6 +41,18 @@ A filter plugin for [OBS Studio](https://obsproject.com) that masks any source â
 
 This plugin is built on the official [obs-plugintemplate](https://github.com/obsproject/obs-plugintemplate) and builds automatically via GitHub Actions on every push. To build locally, follow the standard instructions in the OBS plugin template's own documentation for your platform (CMake + your OS's usual build toolchain).
 
+### Windows installer
+
+To build the Windows installer, install CMake 3.28-3.30, Visual Studio 2022 with the C++ desktop workload and Windows 10 SDK, PowerShell 7.2+, and Inno Setup 6. From the repository root, run:
+
+```powershell
+$env:CI = "true"
+pwsh -File .github\scripts\Build-Windows.ps1 -Target x64 -Configuration RelWithDebInfo
+pwsh -File .github\scripts\Package-Windows.ps1 -Target x64 -Configuration RelWithDebInfo -Package
+```
+
+The installer and plugin archive are written to `release\`. The installer is named `obs-shape-mask-<version>-windows-x64-setup.exe`.
+
 ## Known limitations
 
 - The Border effect doesn't apply in Source Mask mode, since it relies on shape geometry a source mask doesn't have.
