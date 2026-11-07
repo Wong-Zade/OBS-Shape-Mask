@@ -21,12 +21,10 @@ function(_check_dependencies_windows)
   _check_dependencies()
 
   set(onnxruntime_version "1.22.0")
+  set(onnxruntime_archive "${dependencies_dir}/microsoft.ml.onnxruntime.directml.${onnxruntime_version}.nupkg")
   set(
-    onnxruntime_archive
-    "${dependencies_dir}/microsoft.ml.onnxruntime.directml.${onnxruntime_version}.nupkg"
-  )
-  set(onnxruntime_url
-      "https://api.nuget.org/v3-flatcontainer/microsoft.ml.onnxruntime.directml/${onnxruntime_version}/microsoft.ml.onnxruntime.directml.${onnxruntime_version}.nupkg"
+    onnxruntime_url
+    "https://api.nuget.org/v3-flatcontainer/microsoft.ml.onnxruntime.directml/${onnxruntime_version}/microsoft.ml.onnxruntime.directml.${onnxruntime_version}.nupkg"
   )
   set(
     onnxruntime_hash
@@ -43,7 +41,9 @@ function(_check_dependencies_windows)
 
   if(NOT EXISTS "${onnxruntime_archive}")
     file(
-      DOWNLOAD "${onnxruntime_url}" "${onnxruntime_archive}" STATUS download_status
+      DOWNLOAD "${onnxruntime_url}"
+      "${onnxruntime_archive}"
+      STATUS download_status
       EXPECTED_HASH "SHA512=${onnxruntime_hash}"
     )
     list(GET download_status 0 download_error)
@@ -65,17 +65,14 @@ function(_check_dependencies_windows)
   set(yunet_model "${dependencies_dir}/face_detection_yunet_2023mar.onnx")
   if(EXISTS "${yunet_model}")
     file(SHA256 "${yunet_model}" existing_yunet_hash)
-    if(
-      NOT existing_yunet_hash STREQUAL
-      "8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4"
-    )
+    if(NOT existing_yunet_hash STREQUAL "8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4")
       file(REMOVE "${yunet_model}")
     endif()
   endif()
   if(NOT EXISTS "${yunet_model}")
     file(
       DOWNLOAD
-      "https://github.com/opencv/opencv_zoo/raw/48b10fa505aeb51fbd127fc60a5c660040e823b7/models/face_detection_yunet/face_detection_yunet_2023mar.onnx"
+        "https://github.com/opencv/opencv_zoo/raw/48b10fa505aeb51fbd127fc60a5c660040e823b7/models/face_detection_yunet/face_detection_yunet_2023mar.onnx"
       "${yunet_model}"
       STATUS download_status
       EXPECTED_HASH SHA256=8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4

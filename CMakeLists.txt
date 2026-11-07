@@ -38,10 +38,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE src/plugin-main.c)
 
 if(OS_WINDOWS)
   target_sources(${CMAKE_PROJECT_NAME} PRIVATE src/face_tracker.c)
-  target_include_directories(
-    ${CMAKE_PROJECT_NAME}
-    PRIVATE "${ONNXRUNTIME_ROOT}/build/native/include"
-  )
+  target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE "${ONNXRUNTIME_ROOT}/build/native/include")
 
   install(
     FILES
@@ -52,9 +49,7 @@ if(OS_WINDOWS)
 
   install(FILES "${YUNET_MODEL}" DESTINATION "${CMAKE_PROJECT_NAME}/data")
   install(
-    FILES
-      "${ONNXRUNTIME_ROOT}/LICENSE"
-      "${ONNXRUNTIME_ROOT}/ThirdPartyNotices.txt"
+    FILES "${ONNXRUNTIME_ROOT}/LICENSE" "${ONNXRUNTIME_ROOT}/ThirdPartyNotices.txt"
     DESTINATION "${CMAKE_PROJECT_NAME}/data/licenses"
   )
   set(rundir "${CMAKE_CURRENT_BINARY_DIR}/rundir/$<CONFIG>/${CMAKE_PROJECT_NAME}")
@@ -62,24 +57,17 @@ if(OS_WINDOWS)
   add_custom_command(
     TARGET ${CMAKE_PROJECT_NAME}
     POST_BUILD
+    COMMAND "${CMAKE_COMMAND}" -E make_directory "${rundir}"
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${YUNET_MODEL}" "${rundir}/yunet.onnx"
+    COMMAND "${CMAKE_COMMAND}" -E make_directory "${rundir}/licenses"
     COMMAND
-      "${CMAKE_COMMAND}" -E make_directory
-      "${rundir}"
-    COMMAND
-      "${CMAKE_COMMAND}" -E copy_if_different "${YUNET_MODEL}" "${rundir}/yunet.onnx"
-    COMMAND
-      "${CMAKE_COMMAND}" -E make_directory "${rundir}/licenses"
-    COMMAND
-      "${CMAKE_COMMAND}" -E copy_if_different "${ONNXRUNTIME_ROOT}/LICENSE"
-      "${rundir}/licenses/onnxruntime-LICENSE.txt"
+      "${CMAKE_COMMAND}" -E copy_if_different "${ONNXRUNTIME_ROOT}/LICENSE" "${rundir}/licenses/onnxruntime-LICENSE.txt"
     COMMAND
       "${CMAKE_COMMAND}" -E copy_if_different "${ONNXRUNTIME_ROOT}/ThirdPartyNotices.txt"
       "${rundir}/licenses/onnxruntime-ThirdPartyNotices.txt"
+    COMMAND "${CMAKE_COMMAND}" -E make_directory "${rundir_plugin_bin}"
     COMMAND
-      "${CMAKE_COMMAND}" -E make_directory "${rundir_plugin_bin}"
-    COMMAND
-      "${CMAKE_COMMAND}" -E copy_if_different
-      "${ONNXRUNTIME_ROOT}/runtimes/win-x64/native/onnxruntime.dll"
+      "${CMAKE_COMMAND}" -E copy_if_different "${ONNXRUNTIME_ROOT}/runtimes/win-x64/native/onnxruntime.dll"
       "${rundir_plugin_bin}/onnxruntime.dll"
     COMMAND
       "${CMAKE_COMMAND}" -E copy_if_different
