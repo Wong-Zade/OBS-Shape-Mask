@@ -4,6 +4,11 @@
 #include <string.h>
 #include <math.h>
 
+#ifdef _WIN32
+#include "face_tracker.h"
+#include <windows.h>
+#endif
+
 OBS_DECLARE_MODULE()
 OBS_MODULE_USE_DEFAULT_LOCALE("obs-shape-window", "en-US")
 
@@ -12,6 +17,8 @@ OBS_MODULE_USE_DEFAULT_LOCALE("obs-shape-window", "en-US")
 #define SETTING_SCALE_Y       "scale_y"
 #define SETTING_OFFSET_X      "offset_x"
 #define SETTING_OFFSET_Y      "offset_y"
+#define SETTING_FACE_FOLLOW    "face_follow"
+#define SETTING_FACE_SMOOTHING "face_smoothing"
 #define SETTING_FEATHER       "feather"
 #define SETTING_CORNER_RADIUS "corner_radius"
 #define SETTING_ROTATION      "rotation"
@@ -105,6 +112,23 @@ struct shape_mask_filter {
 	float scale_y;
 	float offset_x;
 	float offset_y;
+#ifdef _WIN32
+	bool face_follow;
+	float face_smoothing;
+	bool face_warned_source;
+	bool face_warned_format;
+	struct face_tracker *face_tracker;
+	uint8_t *face_frame;
+	uint64_t last_face_submit_ms;
+	uint64_t face_result_sequence;
+	uint64_t face_measurement_ms;
+	float face_measurement_x;
+	float face_measurement_y;
+	float face_velocity_x;
+	float face_velocity_y;
+	float face_offset_x;
+	float face_offset_y;
+#endif
 	float feather;
 	float corner_radius;
 	float rotation;
@@ -158,6 +182,176 @@ static float clampf(float v, float lo, float hi)
 	return v;
 }
 
+#ifdef _WIN32
+static uint8_t clamp_byte(int value)
+{
+	return (uint8_t)(value < 0 ? 0 : (value > 255 ? 255 : value));
+}
+
+static void yuv_to_bgr(uint8_t y, uint8_t u, uint8_t v, bool full_range, uint8_t *bgr)
+{
+	int c = full_range ? y : (int)y - 16;
+	int d = (int)u - 128;
+	int e = (int)v - 128;
+
+	if (full_range) {
+		bgr[0] = clamp_byte((int)(y + 1.772f * d));
+		bgr[1] = clamp_byte((int)(y - 0.344136f * d - 0.714136f * e));
+		bgr[2] = clamp_byte((int)(y + 1.402f * e));
+	} else {
+		if (c < 0)
+			c = 0;
+		bgr[0] = clamp_byte((298 * c + 516 * d + 128) >> 8);
+		bgr[1] = clamp_byte((298 * c - 100 * d - 208 * e + 128) >> 8);
+		bgr[2] = clamp_byte((298 * c + 409 * e + 128) >> 8);
+	}
+}
+
+static bool shape_mask_convert_frame(const struct obs_source_frame *frame, uint8_t *bgr)
+{
+	if (!frame || !frame->width || !frame->height || !frame->data[0])
+		return false;
+
+	for (uint32_t y_out = 0; y_out < FACE_TRACKER_HEIGHT; y_out++) {
+		uint32_t y = (uint32_t)(((uint64_t)y_out * frame->height) / FACE_TRACKER_HEIGHT);
+		for (uint32_t x_out = 0; x_out < FACE_TRACKER_WIDTH; x_out++) {
+			uint32_t x = (uint32_t)(((uint64_t)x_out * frame->width) / FACE_TRACKER_WIDTH);
+			uint8_t *pixel = bgr + ((size_t)y_out * FACE_TRACKER_WIDTH + x_out) * 3;
+
+			switch (frame->format) {
+			case VIDEO_FORMAT_BGRA:
+			case VIDEO_FORMAT_BGRX: {
+				const uint8_t *src = frame->data[0] + (size_t)y * frame->linesize[0] + (size_t)x * 4;
+				pixel[0] = src[0];
+				pixel[1] = src[1];
+				pixel[2] = src[2];
+				break;
+			}
+			case VIDEO_FORMAT_RGBA: {
+				const uint8_t *src = frame->data[0] + (size_t)y * frame->linesize[0] + (size_t)x * 4;
+				pixel[0] = src[2];
+				pixel[1] = src[1];
+				pixel[2] = src[0];
+				break;
+			}
+			case VIDEO_FORMAT_NV12: {
+				const uint8_t *uv = frame->data[1] + (size_t)(y / 2) * frame->linesize[1] + (x & ~1u);
+				yuv_to_bgr(frame->data[0][(size_t)y * frame->linesize[0] + x], uv[0], uv[1],
+					   frame->full_range, pixel);
+				break;
+			}
+			case VIDEO_FORMAT_I420: {
+				uint8_t luma = frame->data[0][(size_t)y * frame->linesize[0] + x];
+				uint8_t u = frame->data[1][(size_t)(y / 2) * frame->linesize[1] + x / 2];
+				uint8_t v = frame->data[2][(size_t)(y / 2) * frame->linesize[2] + x / 2];
+				yuv_to_bgr(luma, u, v, frame->full_range, pixel);
+				break;
+			}
+			case VIDEO_FORMAT_YUY2:
+			case VIDEO_FORMAT_UYVY: {
+				const uint8_t *src =
+					frame->data[0] + (size_t)y * frame->linesize[0] + (size_t)(x / 2) * 4;
+				uint8_t luma = src[(frame->format == VIDEO_FORMAT_YUY2) ? ((x & 1u) ? 2 : 0)
+											: ((x & 1u) ? 3 : 1)];
+				uint8_t u = src[(frame->format == VIDEO_FORMAT_YUY2) ? 1 : 0];
+				uint8_t v = src[(frame->format == VIDEO_FORMAT_YUY2) ? 3 : 2];
+				yuv_to_bgr(luma, u, v, frame->full_range, pixel);
+				break;
+			}
+			default:
+				return false;
+			}
+		}
+	}
+
+	return true;
+}
+
+static void shape_mask_submit_face_frame(struct shape_mask_filter *f, obs_source_t *parent)
+{
+	uint64_t now = GetTickCount64();
+	if (!f->face_follow || !f->face_tracker || now - f->last_face_submit_ms < 100)
+		return;
+
+	f->last_face_submit_ms = now;
+	if ((obs_source_get_output_flags(parent) & OBS_SOURCE_ASYNC_VIDEO) == 0) {
+		if (!f->face_warned_source) {
+			blog(LOG_WARNING, "[obs-shape-mask] Face follow requires a direct asynchronous video source.");
+			f->face_warned_source = true;
+		}
+		return;
+	}
+
+	struct obs_source_frame *frame = obs_source_get_frame(parent);
+	if (!frame)
+		return;
+
+	if (shape_mask_convert_frame(frame, f->face_frame)) {
+		face_tracker_submit(f->face_tracker, f->face_frame);
+	} else if (!f->face_warned_format) {
+		blog(LOG_WARNING, "[obs-shape-mask] Face follow does not support this source's video format.");
+		f->face_warned_format = true;
+	}
+	obs_source_release_frame(parent, frame);
+}
+
+static void shape_mask_update_face_follow(struct shape_mask_filter *f, float seconds)
+{
+	if (!f->face_follow || !f->face_tracker)
+		return;
+
+	float detected_x;
+	float detected_y;
+	bool found;
+	uint64_t timestamp;
+	uint64_t sequence;
+	if (!face_tracker_get_result(f->face_tracker, &detected_x, &detected_y, &found, &timestamp, &sequence))
+		return;
+
+	if (sequence != f->face_result_sequence) {
+		f->face_result_sequence = sequence;
+		if (found) {
+			uint64_t interval_ms = timestamp > f->face_measurement_ms ? timestamp - f->face_measurement_ms
+										  : 0;
+			if (f->face_measurement_ms && interval_ms >= 50 && interval_ms <= 500) {
+				float interval = (float)interval_ms / 1000.0f;
+				float vx = clampf((detected_x - f->face_measurement_x) / interval, -1.5f, 1.5f);
+				float vy = clampf((detected_y - f->face_measurement_y) / interval, -1.5f, 1.5f);
+				f->face_velocity_x = f->face_velocity_x * 0.5f + vx * 0.5f;
+				f->face_velocity_y = f->face_velocity_y * 0.5f + vy * 0.5f;
+			} else {
+				f->face_velocity_x = 0.0f;
+				f->face_velocity_y = 0.0f;
+			}
+			f->face_measurement_x = detected_x;
+			f->face_measurement_y = detected_y;
+			f->face_measurement_ms = timestamp;
+		}
+	}
+
+	float target_x = 0.0f;
+	float target_y = 0.0f;
+	if (f->face_measurement_ms) {
+		uint64_t age_ms = GetTickCount64() - f->face_measurement_ms;
+		if (age_ms <= 250) {
+			float age = (float)age_ms / 1000.0f;
+			target_x = f->face_measurement_x - 0.5f + f->face_velocity_x * age;
+			target_y = f->face_measurement_y - 0.5f + f->face_velocity_y * age;
+		} else if (age_ms < 1000) {
+			float decay = 1.0f - (float)(age_ms - 250) / 750.0f;
+			target_x = (f->face_measurement_x - 0.5f + f->face_velocity_x * 0.25f) * decay;
+			target_y = (f->face_measurement_y - 0.5f + f->face_velocity_y * 0.25f) * decay;
+		}
+	}
+
+	float alpha = seconds / (f->face_smoothing + seconds);
+	f->face_offset_x += (target_x - f->face_offset_x) * alpha;
+	f->face_offset_y += (target_y - f->face_offset_y) * alpha;
+	f->face_offset_x = clampf(f->face_offset_x, -0.5f, 0.5f);
+	f->face_offset_y = clampf(f->face_offset_y, -0.5f, 0.5f);
+}
+#endif
+
 static float ease_out_back(float t)
 {
 	const float c1 = 1.70158f;
@@ -205,6 +399,11 @@ static void shape_mask_update(void *data, obs_data_t *settings)
 	f->scale_y = (float)obs_data_get_double(settings, SETTING_SCALE_Y);
 	f->offset_x = (float)obs_data_get_double(settings, SETTING_OFFSET_X);
 	f->offset_y = (float)obs_data_get_double(settings, SETTING_OFFSET_Y);
+#ifdef _WIN32
+	f->face_follow = obs_data_get_bool(settings, SETTING_FACE_FOLLOW);
+	f->face_smoothing = clampf((float)obs_data_get_double(settings, SETTING_FACE_SMOOTHING), 0.05f, 1.0f);
+	face_tracker_set_enabled(f->face_tracker, f->face_follow && f->mask_mode == MASK_MODE_SHAPE);
+#endif
 	f->feather = (float)obs_data_get_double(settings, SETTING_FEATHER);
 	f->corner_radius = (float)obs_data_get_double(settings, SETTING_CORNER_RADIUS);
 	f->rotation = (float)obs_data_get_double(settings, SETTING_ROTATION);
@@ -310,8 +509,26 @@ static void *shape_mask_create(obs_data_t *settings, obs_source_t *source)
 	f->param_animation_speed = gs_effect_get_param_by_name(f->effect, "animation_speed");
 	f->param_animation_amount = gs_effect_get_param_by_name(f->effect, "animation_amount");
 
+#ifdef _WIN32
+	char *model_path = obs_module_file("yunet.onnx");
+	if (model_path) {
+		f->face_tracker = face_tracker_create(model_path);
+		bfree(model_path);
+	}
+	if (!f->face_tracker) {
+		blog(LOG_ERROR, "[obs-shape-mask] Face tracker could not be initialized.");
+	} else {
+		f->face_frame = bmalloc(FACE_TRACKER_BGR_SIZE);
+		if (!f->face_frame) {
+			face_tracker_destroy(f->face_tracker);
+			f->face_tracker = NULL;
+			blog(LOG_ERROR, "[obs-shape-mask] Face tracker frame buffer allocation failed.");
+		}
+	}
+#endif
+
 	f->anim_hotkey = obs_hotkey_register_source(source, HOTKEY_POP_ANIM, obs_module_text("ShapeMask.PopHotkey"),
-						      shape_mask_trigger_pop, f);
+						    shape_mask_trigger_pop, f);
 
 	shape_mask_update(f, settings);
 	return f;
@@ -322,6 +539,11 @@ static void shape_mask_destroy(void *data)
 	struct shape_mask_filter *f = data;
 
 	obs_hotkey_unregister(f->anim_hotkey);
+
+#ifdef _WIN32
+	face_tracker_destroy(f->face_tracker);
+	bfree(f->face_frame);
+#endif
 
 	if (f->mask_source_weak)
 		obs_weak_source_release(f->mask_source_weak);
@@ -360,6 +582,10 @@ static void shape_mask_video_tick(void *data, float seconds)
 	   (bounce/shake/pulse/breathe/scale) -- advance the clock if either
 	   is active. */
 	bool needs_clock = f->border_pulse || f->animation != ANIM_NONE;
+#ifdef _WIN32
+	needs_clock = needs_clock || (f->face_follow && f->mask_mode == MASK_MODE_SHAPE);
+	shape_mask_update_face_follow(f, seconds);
+#endif
 
 	if (needs_clock) {
 		f->elapsed_time += seconds;
@@ -454,6 +680,11 @@ static void shape_mask_video_render(void *data, gs_effect_t *unused_effect)
 
 	bool use_source_mask = (f->mask_mode == MASK_MODE_SOURCE && f->mask_source_weak != NULL);
 
+#ifdef _WIN32
+	if (f->face_follow && f->mask_mode == MASK_MODE_SHAPE)
+		shape_mask_submit_face_frame(f, parent);
+#endif
+
 	if (use_source_mask)
 		shape_mask_render_source_mask(f);
 
@@ -466,7 +697,15 @@ static void shape_mask_video_render(void *data, gs_effect_t *unused_effect)
 	vec2_set(&uv_size, (float)width, (float)height);
 
 	struct vec2 offset;
+#ifdef _WIN32
+	if (f->face_follow && f->mask_mode == MASK_MODE_SHAPE) {
+		vec2_set(&offset, f->face_offset_x, f->face_offset_y);
+	} else {
+		vec2_set(&offset, f->offset_x, f->offset_y);
+	}
+#else
 	vec2_set(&offset, f->offset_x, f->offset_y);
+#endif
 
 	struct vec2 scale;
 	vec2_set(&scale, f->scale_x * anim_scale, f->scale_y * anim_scale);
@@ -571,6 +810,23 @@ static bool shadow_enabled_modified(obs_properties_t *props, obs_property_t *pro
 	return true;
 }
 
+#ifdef _WIN32
+static bool face_follow_modified(obs_properties_t *props, obs_property_t *prop, obs_data_t *settings)
+{
+	UNUSED_PARAMETER(prop);
+
+	bool shape_mode = (int)obs_data_get_int(settings, SETTING_MASK_MODE) == MASK_MODE_SHAPE;
+	bool enabled = obs_data_get_bool(settings, SETTING_FACE_FOLLOW);
+
+	obs_property_set_visible(obs_properties_get(props, SETTING_FACE_FOLLOW), shape_mode);
+	obs_property_set_visible(obs_properties_get(props, SETTING_FACE_SMOOTHING), shape_mode && enabled);
+	obs_property_set_visible(obs_properties_get(props, SETTING_OFFSET_X), shape_mode && !enabled);
+	obs_property_set_visible(obs_properties_get(props, SETTING_OFFSET_Y), shape_mode && !enabled);
+
+	return true;
+}
+#endif
+
 static bool shape_modified(obs_properties_t *props, obs_property_t *prop, obs_data_t *settings)
 {
 	UNUSED_PARAMETER(prop);
@@ -597,6 +853,9 @@ static bool mask_mode_modified(obs_properties_t *props, obs_property_t *prop, ob
 	obs_property_set_visible(obs_properties_get(props, SETTING_BORDER_ENABLE), shape_mode);
 
 	obs_property_set_visible(obs_properties_get(props, SETTING_MASK_SOURCE), source_mode);
+#ifdef _WIN32
+	face_follow_modified(props, NULL, settings);
+#endif
 
 	if (shape_mode) {
 		shape_modified(props, NULL, settings);
@@ -640,20 +899,20 @@ static obs_properties_t *shape_mask_properties(void *data)
 	obs_properties_t *props = obs_properties_create();
 
 	obs_property_t *mode_list = obs_properties_add_list(props, SETTING_MASK_MODE,
-							      obs_module_text("ShapeMask.MaskMode"),
-							      OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
+							    obs_module_text("ShapeMask.MaskMode"), OBS_COMBO_TYPE_LIST,
+							    OBS_COMBO_FORMAT_INT);
 	obs_property_list_add_int(mode_list, obs_module_text("ShapeMask.MaskMode.Shape"), MASK_MODE_SHAPE);
 	obs_property_list_add_int(mode_list, obs_module_text("ShapeMask.MaskMode.Source"), MASK_MODE_SOURCE);
 	obs_property_set_modified_callback(mode_list, mask_mode_modified);
 
 	obs_property_t *mask_source_list = obs_properties_add_list(props, SETTING_MASK_SOURCE,
-								     obs_module_text("ShapeMask.MaskSource"),
-								     OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_STRING);
+								   obs_module_text("ShapeMask.MaskSource"),
+								   OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_STRING);
 	obs_property_list_add_string(mask_source_list, obs_module_text("ShapeMask.MaskSource.None"), "");
 	obs_enum_sources(enum_source_add, mask_source_list);
 
 	obs_property_t *shape_list = obs_properties_add_list(props, SETTING_SHAPE, obs_module_text("ShapeMask.Shape"),
-							       OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
+							     OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
 
 	obs_property_list_add_int(shape_list, obs_module_text("ShapeMask.Shape.Circle"), SHAPE_CIRCLE);
 	obs_property_list_add_int(shape_list, obs_module_text("ShapeMask.Shape.RoundedRect"), SHAPE_ROUNDED_RECT);
@@ -665,17 +924,24 @@ static obs_properties_t *shape_mask_properties(void *data)
 	obs_properties_add_float_slider(props, SETTING_SCALE_Y, obs_module_text("ShapeMask.ScaleY"), 0.1, 1.5, 0.01);
 
 	obs_properties_add_float_slider(props, SETTING_OFFSET_X, obs_module_text("ShapeMask.OffsetX"), -0.5, 0.5,
-					 0.005);
+					0.005);
 	obs_properties_add_float_slider(props, SETTING_OFFSET_Y, obs_module_text("ShapeMask.OffsetY"), -0.5, 0.5,
-					 0.005);
+					0.005);
 
-	obs_properties_add_float_slider(props, SETTING_FEATHER, obs_module_text("ShapeMask.Feather"), 0.0, 0.20,
-					 0.002);
+#ifdef _WIN32
+	obs_property_t *face_follow =
+		obs_properties_add_bool(props, SETTING_FACE_FOLLOW, obs_module_text("ShapeMask.FaceFollow"));
+	obs_properties_add_float_slider(props, SETTING_FACE_SMOOTHING, obs_module_text("ShapeMask.FaceSmoothing"), 0.05,
+					1.0, 0.05);
+	obs_property_set_modified_callback(face_follow, face_follow_modified);
+#endif
+
+	obs_properties_add_float_slider(props, SETTING_FEATHER, obs_module_text("ShapeMask.Feather"), 0.0, 0.20, 0.002);
 
 	obs_properties_add_float_slider(props, SETTING_CORNER_RADIUS, obs_module_text("ShapeMask.CornerRadius"), 0.0,
-					 0.5, 0.005);
-	obs_properties_add_float_slider(props, SETTING_ROTATION, obs_module_text("ShapeMask.Rotation"), -180.0,
-					 180.0, 1.0);
+					0.5, 0.005);
+	obs_properties_add_float_slider(props, SETTING_ROTATION, obs_module_text("ShapeMask.Rotation"), -180.0, 180.0,
+					1.0);
 
 	obs_properties_add_bool(props, SETTING_MASK_INVERT, obs_module_text("ShapeMask.MaskInvert"));
 
@@ -685,41 +951,41 @@ static obs_properties_t *shape_mask_properties(void *data)
 	obs_properties_add_color(props, SETTING_BORDER_COLOR, obs_module_text("ShapeMask.BorderColor"));
 
 	obs_properties_add_float_slider(props, SETTING_BORDER_WIDTH, obs_module_text("ShapeMask.BorderWidth"), 0.0,
-					 0.12, 0.001);
+					0.12, 0.001);
 	obs_properties_add_float_slider(props, SETTING_BORDER_SOFT, obs_module_text("ShapeMask.BorderSoftness"), 0.0,
-					 0.05, 0.001);
+					0.05, 0.001);
 	obs_properties_add_float_slider(props, SETTING_BORDER_OPACITY, obs_module_text("ShapeMask.BorderOpacity"), 0.0,
-					 1.0, 0.01);
+					1.0, 0.01);
 
-	obs_properties_add_float_slider(props, SETTING_BORDER_GLOW, obs_module_text("ShapeMask.BorderGlow"), 0.0,
-					 1.0, 0.01);
+	obs_properties_add_float_slider(props, SETTING_BORDER_GLOW, obs_module_text("ShapeMask.BorderGlow"), 0.0, 1.0,
+					0.01);
 
 	obs_property_t *border_pulse =
 		obs_properties_add_bool(props, SETTING_BORDER_PULSE, obs_module_text("ShapeMask.BorderPulse"));
 
-	obs_properties_add_float_slider(props, SETTING_PULSE_SPEED, obs_module_text("ShapeMask.PulseSpeed"), 0.1,
-					 12.0, 0.1);
+	obs_properties_add_float_slider(props, SETTING_PULSE_SPEED, obs_module_text("ShapeMask.PulseSpeed"), 0.1, 12.0,
+					0.1);
 
-	obs_properties_add_float_slider(props, SETTING_PULSE_AMOUNT, obs_module_text("ShapeMask.PulseAmount"), 0.0,
-					 1.0, 0.05);
+	obs_properties_add_float_slider(props, SETTING_PULSE_AMOUNT, obs_module_text("ShapeMask.PulseAmount"), 0.0, 1.0,
+					0.05);
 
 	obs_property_t *shadow_enable =
 		obs_properties_add_bool(props, SETTING_SHADOW_ENABLE, obs_module_text("ShapeMask.ShadowEnable"));
 
 	obs_properties_add_color(props, SETTING_SHADOW_COLOR, obs_module_text("ShapeMask.ShadowColor"));
 
-	obs_properties_add_float_slider(props, SETTING_SHADOW_OFFSETX, obs_module_text("ShapeMask.ShadowOffsetX"),
-					 -0.3, 0.3, 0.005);
-	obs_properties_add_float_slider(props, SETTING_SHADOW_OFFSETY, obs_module_text("ShapeMask.ShadowOffsetY"),
-					 -0.3, 0.3, 0.005);
+	obs_properties_add_float_slider(props, SETTING_SHADOW_OFFSETX, obs_module_text("ShapeMask.ShadowOffsetX"), -0.3,
+					0.3, 0.005);
+	obs_properties_add_float_slider(props, SETTING_SHADOW_OFFSETY, obs_module_text("ShapeMask.ShadowOffsetY"), -0.3,
+					0.3, 0.005);
 	obs_properties_add_float_slider(props, SETTING_SHADOW_BLUR, obs_module_text("ShapeMask.ShadowBlur"), 0.001,
-					 0.25, 0.002);
-	obs_properties_add_float_slider(props, SETTING_SHADOW_OPACITY, obs_module_text("ShapeMask.ShadowOpacity"),
-					 0.0, 1.0, 0.01);
+					0.25, 0.002);
+	obs_properties_add_float_slider(props, SETTING_SHADOW_OPACITY, obs_module_text("ShapeMask.ShadowOpacity"), 0.0,
+					1.0, 0.01);
 
 	obs_property_t *animation = obs_properties_add_list(props, SETTING_ANIMATION,
-							      obs_module_text("ShapeMask.Animation"),
-							      OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
+							    obs_module_text("ShapeMask.Animation"), OBS_COMBO_TYPE_LIST,
+							    OBS_COMBO_FORMAT_INT);
 	obs_property_list_add_int(animation, obs_module_text("ShapeMask.Animation.None"), ANIM_NONE);
 	obs_property_list_add_int(animation, obs_module_text("ShapeMask.Animation.Pulse"), ANIM_PULSE);
 	obs_property_list_add_int(animation, obs_module_text("ShapeMask.Animation.Breathe"), ANIM_BREATHE);
@@ -728,9 +994,9 @@ static obs_properties_t *shape_mask_properties(void *data)
 	obs_property_list_add_int(animation, obs_module_text("ShapeMask.Animation.Shake"), ANIM_SHAKE);
 	obs_property_list_add_int(animation, obs_module_text("ShapeMask.Animation.Scale"), ANIM_SCALE);
 	obs_properties_add_float_slider(props, SETTING_ANIM_SPEED, obs_module_text("ShapeMask.AnimationSpeed"), 0.0,
-					 10.0, 0.1);
+					10.0, 0.1);
 	obs_properties_add_float_slider(props, SETTING_ANIM_AMOUNT, obs_module_text("ShapeMask.AnimationAmount"), 0.0,
-					 1.0, 0.01);
+					1.0, 0.01);
 
 	obs_property_set_modified_callback(border_enable, border_enabled_modified);
 	obs_property_set_modified_callback(border_pulse, border_pulse_modified);
@@ -744,6 +1010,9 @@ static obs_properties_t *shape_mask_properties(void *data)
 			border_enabled_modified(props, NULL, settings);
 			border_pulse_modified(props, NULL, settings);
 			shadow_enabled_modified(props, NULL, settings);
+#ifdef _WIN32
+			face_follow_modified(props, NULL, settings);
+#endif
 			obs_data_release(settings);
 		}
 	}
@@ -763,6 +1032,10 @@ static void shape_mask_defaults(obs_data_t *settings)
 
 	obs_data_set_default_double(settings, SETTING_OFFSET_X, 0.0);
 	obs_data_set_default_double(settings, SETTING_OFFSET_Y, 0.0);
+#ifdef _WIN32
+	obs_data_set_default_bool(settings, SETTING_FACE_FOLLOW, false);
+	obs_data_set_default_double(settings, SETTING_FACE_SMOOTHING, 0.20);
+#endif
 
 	obs_data_set_default_double(settings, SETTING_FEATHER, 0.01);
 
@@ -822,6 +1095,4 @@ bool obs_module_load(void)
 	return true;
 }
 
-void obs_module_unload(void)
-{
-}
+void obs_module_unload(void) {}

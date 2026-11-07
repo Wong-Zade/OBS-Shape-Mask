@@ -16,6 +16,7 @@ A filter plugin for [OBS Studio](https://obsproject.com) that masks any source �
 - **Border** — solid border, with adjustable width, opacity, and an animated pulse
 - **Drop Shadow** — offset, blurred, colored shadow that sits behind your content
 - **Source Mask mode** — use another source's alpha channel as the mask instead of a geometric shape
+- **Face follow (experimental, Windows)** — move the shape mask to keep a face centered in it
 - **Hotkey-triggered pop animation** — bind a key to trigger a one-shot bouncy scale-in effect
 - **Shape Animation** — Pulse, Breathe, Rotate, Bounce, Shake, or Scale, running continuously
 
@@ -35,6 +36,7 @@ A filter plugin for [OBS Studio](https://obsproject.com) that masks any source �
 - Turn on **Enable Border** or **Enable Glow** for an outline/halo effect.
 - Turn on **Enable Drop Shadow** for a soft shadow behind your content.
 - Switch **Mask Type** to **Source Mask** to use another source's alpha channel as the mask instead of a geometric shape (note: the Border effect isn't available in this mode).
+- On Windows, enable **Follow Face (Experimental)** to move the shape mask opening with a face in a direct webcam/video source. Detection runs locally; scene/group sources and rendered sources are not supported by this first prototype. While face follow is on, it takes over the manual offset controls.
 - Bind the **"Shape Mask: Trigger Pop Animation"** hotkey under OBS Settings → Hotkeys for a one-shot pop-in effect.
 
 ## Building from source
@@ -43,7 +45,7 @@ This plugin is built on the official [obs-plugintemplate](https://github.com/obs
 
 ### Windows installer
 
-To build the Windows installer, install CMake 3.28-3.30, Visual Studio 2022 with the C++ desktop workload and Windows 10 SDK, PowerShell 7.2+, and Inno Setup 6. From the repository root, run:
+To build the Windows installer, install CMake 3.28-3.30, Visual Studio 2022 with the C++ desktop workload and Windows 10 SDK, PowerShell 7.2+, and Inno Setup 6. The Windows build downloads pinned ONNX Runtime and YuNet model artifacts during CMake configuration. From the repository root, run:
 
 ```powershell
 $env:CI = "true"
